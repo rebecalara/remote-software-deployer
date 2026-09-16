@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  displayName String
+  email       String?
+  role        String
+  createdAt   DateTime @default(now())
+
+  deployments Deployment[]
+}
+
+model Machine {
+  id              String    @id @default(uuid())
+  hostname        String    @unique
+  ipAddress       String?
+  operatingSystem String?
+  department      String?
+  status          String    @default("unknown")
+  lastSync        DateTime?
+
+  targets DeploymentTarget[]
+}
+
+model Software {
+  id            String   @id @default(uuid())
+  name          String
+  version       String
+  vendor        String?
+  installerPath String
+  installType   String
+  createdAt     DateTime @default(now())
+
+  deployments Deployment[]
+}
+
+model Deployment {
+  id         String    @id @default(uuid())
+  name       String
+  userId     String
+  softwareId String
+  status     String    @default("pending")
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  user     User     @relation(fields: [userId], references: [id])
+  software Software @relation(fields: [softwareId], references: [id])
+  targets  DeploymentTarget[]
+}
+
+model DeploymentTarget {
+  id           String    @id @default(uuid())
+  deploymentId String
+  machineId    String
+  status       String    @default("pending")
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id])
+  machine    Machine    @relation(fields: [machineId], references: [id])
+  logs       DeploymentLog[]
+}
+
+model DeploymentLog {
+  id                 String   @id @default(uuid())
+  deploymentTargetId String
+  timestamp           DateTime @default(now())
+  level                String
+  message              String
+
+  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id])
+}
