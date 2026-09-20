@@ -7,48 +7,115 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  ERROR
+  UNKNOWN
+}
+
+enum InstallType {
+  MSI
+  EXE
+  POWERSHELL
+  BASH
+}
+
+enum DeploymentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TargetStatus {
+  PENDING
+  DOWNLOADING
+  INSTALLING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+  DEBUG
+}
+
+// -----------------------------------------------------------------------------
+// MODELOS
+// -----------------------------------------------------------------------------
+
 model User {
-  id          String   @id @default(uuid())
-  username    String   @unique
-  displayName String
-  email       String?
-  role        String
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  username     String   @unique
+  displayName  String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(OPERATOR)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   deployments Deployment[]
 }
 
 model Machine {
-  id              String    @id @default(uuid())
-  hostname        String    @unique
+  id              String        @id @default(uuid())
+  hostname        String        @unique
   ipAddress       String?
+  macAddress      String?       @unique
   operatingSystem String?
   department      String?
-  status          String    @default("unknown")
+  status          MachineStatus @default(UNKNOWN)
   lastSync        DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   targets DeploymentTarget[]
 }
 
 model Software {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   name          String
   version       String
   vendor        String?
   installerPath String
-  installType   String
-  createdAt     DateTime @default(now())
+  installType   InstallType @default(EXE)
+  silentArgs    String?     // Argumentos de instalação não-interativa (ex: /qn /norestart ou /VERYSILENT)
+  uninstallArgs String?
+  checksum      String?     // Hash SHA-256 para checagem de integridade do arquivo
+  fileSizeBytes BigInt?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   deployments Deployment[]
+
+  @@unique([name, version])
 }
 
 model Deployment {
-  id         String    @id @default(uuid())
+  id         String           @id @default(uuid())
   name       String
   userId     String
   softwareId String
-  status     String    @default("pending")
-  createdAt  DateTime  @default(now())
+  status     DeploymentStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
   startedAt  DateTime?
   finishedAt DateTime?
 
@@ -58,26 +125,30 @@ model Deployment {
 }
 
 model DeploymentTarget {
-  id           String    @id @default(uuid())
+  id           String       @id @default(uuid())
   deploymentId String
   machineId    String
-  status       String    @default("pending")
+  status       TargetStatus @default(PENDING)
+  exitCode     Int?         // Código de retorno do instalador (0 = sucesso)
   startedAt    DateTime?
   finishedAt   DateTime?
 
-  deployment Deployment      @relation(fields: [deploymentId], references: [id])
+  deployment Deployment      @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
   machine    Machine         @relation(fields: [machineId], references: [id])
   logs       DeploymentLog[]
 
   @@unique([deploymentId, machineId])
+  @@index([machineId])
 }
 
 model DeploymentLog {
   id                 String   @id @default(uuid())
   deploymentTargetId String
   timestamp          DateTime @default(now())
-  level              String
-  message            String
+  level              LogLevel @default(INFO)
+  message            String   @db.Text
 
-  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id])
+  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentTargetId, timestamp])
 }
