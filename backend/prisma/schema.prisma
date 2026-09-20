@@ -7,77 +7,116 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+enum DeploymentStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum InstallType {
+  MSI
+  EXE
+  SCRIPT
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
 model User {
   id          String   @id @default(uuid())
   username    String   @unique
   displayName String
   email       String?
-  role        String
+  role        UserRole
   createdAt   DateTime @default(now())
 
   deployments Deployment[]
 }
 
 model Machine {
-  id              String    @id @default(uuid())
-  hostname        String    @unique
+  id              String        @id @default(uuid())
+  hostname        String        @unique
   ipAddress       String?
   operatingSystem String?
   department      String?
-  status          String    @default("unknown")
+  status          MachineStatus @default(UNKNOWN)
   lastSync        DateTime?
 
   targets DeploymentTarget[]
 }
 
 model Software {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   name          String
   version       String
   vendor        String?
   installerPath String
-  installType   String
-  createdAt     DateTime @default(now())
+  installType   InstallType
+  createdAt     DateTime    @default(now())
 
   deployments Deployment[]
 }
 
 model Deployment {
-  id         String    @id @default(uuid())
+  id         String           @id @default(uuid())
   name       String
   userId     String
   softwareId String
-  status     String    @default("pending")
-  createdAt  DateTime  @default(now())
+  status     DeploymentStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
   startedAt  DateTime?
   finishedAt DateTime?
 
   user     User               @relation(fields: [userId], references: [id])
   software Software           @relation(fields: [softwareId], references: [id])
   targets  DeploymentTarget[]
+
+  @@index([userId])
+  @@index([softwareId])
 }
 
 model DeploymentTarget {
-  id           String    @id @default(uuid())
+  id           String           @id @default(uuid())
   deploymentId String
   machineId    String
-  status       String    @default("pending")
+  status       DeploymentStatus @default(PENDING)
   startedAt    DateTime?
   finishedAt   DateTime?
 
-  deployment Deployment      @relation(fields: [deploymentId], references: [id])
+  deployment Deployment      @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
   machine    Machine         @relation(fields: [machineId], references: [id])
   logs       DeploymentLog[]
 
   @@unique([deploymentId, machineId])
+  @@index([machineId])
 }
 
 model DeploymentLog {
   id                 String   @id @default(uuid())
   deploymentTargetId String
   timestamp          DateTime @default(now())
-  level              String
+  level              LogLevel
   message            String
 
-  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id])
+  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentTargetId, timestamp])
 }
