@@ -52,8 +52,8 @@ model Deployment {
   startedAt  DateTime?
   finishedAt DateTime?
 
-  user     User     @relation(fields: [userId], references: [id])
-  software Software @relation(fields: [softwareId], references: [id])
+  user     User               @relation(fields: [userId], references: [id])
+  software Software           @relation(fields: [softwareId], references: [id])
   targets  DeploymentTarget[]
 }
 
@@ -65,17 +65,19 @@ model DeploymentTarget {
   startedAt    DateTime?
   finishedAt   DateTime?
 
-  deployment Deployment @relation(fields: [deploymentId], references: [id])
-  machine    Machine    @relation(fields: [machineId], references: [id])
+  deployment Deployment      @relation(fields: [deploymentId], references: [id])
+  machine    Machine         @relation(fields: [machineId], references: [id])
   logs       DeploymentLog[]
+
+  @@unique([deploymentId, machineId])
 }
 
 model DeploymentLog {
   id                 String   @id @default(uuid())
   deploymentTargetId String
-  timestamp           DateTime @default(now())
-  level                String
-  message              String
+  timestamp          DateTime @default(now())
+  level              String
+  message            String
 
   deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id])
 }
