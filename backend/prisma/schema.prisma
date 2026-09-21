@@ -7,6 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+//Substituir role String por enum tipado (UserRole).
 model User {
   id          String   @id @default(uuid())
   username    String   @unique
@@ -18,6 +19,7 @@ model User {
   deployments Deployment[]
 }
 
+//Substituir status String por enum (MachineStatus).
 model Machine {
   id              String    @id @default(uuid())
   hostname        String    @unique
@@ -30,6 +32,7 @@ model Machine {
   targets DeploymentTarget[]
 }
 
+//Substituir installType String por enum (InstallType).
 model Software {
   id            String   @id @default(uuid())
   name          String
@@ -42,6 +45,7 @@ model Software {
   deployments Deployment[]
 }
 
+//Substituir status String por enum (DeploymentStatus).
 model Deployment {
   id         String    @id @default(uuid())
   name       String
@@ -57,6 +61,7 @@ model Deployment {
   targets  DeploymentTarget[]
 }
 
+//Substituir status String por enum específico do target (TargetStatus).
 model DeploymentTarget {
   id           String    @id @default(uuid())
   deploymentId String
