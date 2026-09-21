@@ -1,7 +1,20 @@
 # Remote Software Deployer
 
-Descrição
+## Descrição
 
+O Remote Software Deployer é uma plataforma web para gerenciamento e implantação
+remota de softwares em computadores corporativos, desenvolvida como Trabalho de
+Conclusão de Curso em Engenharia de Software.
+
+O projeto nasceu de uma necessidade real observada na Prefeitura Municipal de
+Joinville: centralizar e simplificar o processo de instalação de softwares em
+múltiplas máquinas da rede, hoje realizado de forma manual ou com ferramentas
+que não cobrem todos os cenários do dia a dia da equipe de TI.
+
+A plataforma permite consultar máquinas via Active Directory, selecionar
+softwares de um catálogo próprio, e executar instalações remotamente através
+de WinRM e PowerShell — sem exigir nenhum agente instalado previamente nas
+máquinas clientes.
 
 ## Stack
 
@@ -12,8 +25,14 @@ Descrição
 
 ### 1. Criar o banco
 
+**Opção A — via Docker (recomendado):**
+```bash
+docker run --name rsd-db -e POSTGRES_PASSWORD=sua_senha -e POSTGRES_DB=remote_software_deployer -p 5432:5432 -d postgres
+```
+
+**Opção B — PostgreSQL já instalado localmente:**
 ```sql
-CREATE DATABASE deployer;
+CREATE DATABASE remote_software_deployer;
 ```
 
 ### 2. Instalar as dependências
