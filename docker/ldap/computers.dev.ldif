@@ -1,0 +1,119 @@
+# Máquinas FICTÍCIAS para desenvolvimento local — nenhum hostname real da Prefeitura.
+# Schema `device` (o OpenLDAP não tem o `computer` do AD): o SO vai em `description`,
+# por isso o .env local usa LDAP_COMPUTER_OS_ATTRIBUTE="description".
+# O setor vem da primeira OU do DN, como no AD real.
+#
+# Casos de borda propositais:
+#   - ws-edu-003 em minúsculas (o sistema normaliza para WS-EDU-003)
+#   - WS-OBR-001 numa OU com vírgula escapada ("Obras, Viacao")
+#   - WS-SAU-004 sem description (SO desconhecido)
+
+dn: ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: computers
+
+# --- OUs de setor ---
+
+dn: ou=ADMINISTRACAO,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: ADMINISTRACAO
+
+dn: ou=FINANCEIRO,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: FINANCEIRO
+
+dn: ou=RH,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: RH
+
+dn: ou=TI,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: TI
+
+dn: ou=SAUDE,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: SAUDE
+
+dn: ou=EDUCACAO,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: EDUCACAO
+
+dn: ou=Obras\, Viacao,ou=computers,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: Obras, Viacao
+
+# --- Máquinas ---
+
+dn: cn=WS-ADM-001,ou=ADMINISTRACAO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-ADM-001
+description: Windows 11 Pro
+
+dn: cn=WS-ADM-002,ou=ADMINISTRACAO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-ADM-002
+description: Windows 11 Pro
+
+dn: cn=WS-ADM-041,ou=ADMINISTRACAO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-ADM-041
+description: Windows 10 Pro
+
+dn: cn=WS-FIN-001,ou=FINANCEIRO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-FIN-001
+description: Windows 11 Pro
+
+dn: cn=WS-FIN-002,ou=FINANCEIRO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-FIN-002
+description: Windows 11 Pro
+
+dn: cn=WS-FIN-022,ou=FINANCEIRO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-FIN-022
+description: Windows 10 Pro
+
+dn: cn=WS-RH-005,ou=RH,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-RH-005
+description: Windows 11 Pro
+
+dn: cn=WS-RH-008,ou=RH,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-RH-008
+description: Windows 11 Pro
+
+dn: cn=WS-TI-015,ou=TI,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-TI-015
+description: Windows 11 Pro
+
+dn: cn=WS-TI-016,ou=TI,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-TI-016
+description: Windows 11 Enterprise
+
+dn: cn=WS-SAU-001,ou=SAUDE,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-SAU-001
+description: Windows 10 Pro
+
+dn: cn=WS-SAU-004,ou=SAUDE,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-SAU-004
+
+dn: cn=WS-EDU-001,ou=EDUCACAO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-EDU-001
+description: Windows 11 Pro
+
+dn: cn=ws-edu-003,ou=EDUCACAO,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: ws-edu-003
+description: Windows 11 Pro
+
+dn: cn=WS-OBR-001,ou=Obras\, Viacao,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: WS-OBR-001
+description: Windows 10 Pro

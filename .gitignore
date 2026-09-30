@@ -24,4 +24,6 @@ dist-ssr
 *.sln
 *.sw?
 *.ldif
+# Exceção: dados FICTÍCIOS do OpenLDAP local (ver DECISIONS.md)
+!docker/ldap/*.ldif
 *.code-workspace

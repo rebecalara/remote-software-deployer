@@ -1,0 +1,9 @@
+# Dá à conta de serviço leitura SOMENTE na subárvore ou=computers.
+# Inserida como {2}, antes da regra padrão da imagem osixia ("to * by self read
+# ... by * none"), que passa a ser {3} e continua valendo para todo o resto.
+# O admin mantém escrita; qualquer outra conta continua sem enxergar as máquinas.
+
+dn: olcDatabase={1}mdb,cn=config
+changetype: modify
+add: olcAccess
+olcAccess: {2}to dn.subtree="ou=computers,dc=rsd,dc=local" by dn.exact="uid=svc-rsd-leitura,ou=services,dc=rsd,dc=local" read by dn.exact="cn=admin,dc=rsd,dc=local" write by * none
