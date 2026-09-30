@@ -1,0 +1,4 @@
+# Scripts shell precisam de LF: com CRLF, o `sh` falha em `set -eu\r`.
+*.sh   text eol=lf
+# LDIF aplicado via `docker exec` dentro do container Linux.
+*.ldif text eol=lf
