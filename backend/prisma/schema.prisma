@@ -27,10 +27,11 @@ enum DeploymentStatus {
   CANCELLED
 }
 
+// SCRIPT removido de propósito: "instalar via script" seria execução arbitrária
+// (regra do projeto). O comando-base é sempre decidido pelo tipo.
 enum InstallType {
   MSI
   EXE
-  SCRIPT
 }
 
 enum LogLevel {
@@ -48,7 +49,9 @@ model User {
   role        UserRole
   createdAt   DateTime @default(now())
 
-  deployments Deployment[]
+  deployments     Deployment[]
+  softwareCreated Software[]   @relation("SoftwareCreatedBy")
+  softwareUpdated Software[]   @relation("SoftwareUpdatedBy")
 }
 
 model Machine {
@@ -64,15 +67,36 @@ model Machine {
 }
 
 model Software {
-  id            String      @id @default(uuid())
-  name          String
-  version       String
-  vendor        String?
-  installerPath String
-  installType   InstallType
-  createdAt     DateTime    @default(now())
+  id          String      @id @default(uuid())
+  name        String
+  version     String
+  vendor      String?
+  installType InstallType
+  // Tokens passados como parâmetros ao instalador — nunca uma linha de comando.
+  installArgs String[]    @default([])
+  active      Boolean     @default(true)
 
+  // Instalador: preenchido pelo servidor no envio (PUT /software/:id/installer),
+  // nunca digitado. Opcional porque o cadastro (JSON) vem antes do arquivo.
+  installerFileName     String?   @unique // "<uuid>.msi" | "<uuid>.exe"
+  installerOriginalName String? // só para exibição
+  installerSizeBytes    Int? // Int (não BigInt): limite de envio travado em 2000 MB
+  installerSha256       String? // calculado no envio
+  installerUploadedAt   DateTime?
+
+  // Auditoria (RN06 / RNF09): quem cadastrou e quem alterou por último.
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?        @relation("SoftwareCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy   User?        @relation("SoftwareUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
   deployments Deployment[]
+
+  @@unique([name, version])
+  @@index([createdById])
+  @@index([updatedById])
 }
 
 model Deployment {
