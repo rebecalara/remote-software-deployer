@@ -1,65 +1,62 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import * as authService from '../services/authService';
+import {
+  clearSession,
+  isTokenExpired,
+  loadSession,
+  onSessionExpired,
+  saveSession,
+  type StoredSession,
+} from '../services/session';
 import type { AuthenticatedUser } from '../types/auth';
-
-const STORAGE_KEY = 'rsd.auth';
-
-interface StoredSession {
-  token: string;
-  user: AuthenticatedUser;
-}
 
 interface AuthContextValue {
   user: AuthenticatedUser | null;
   token: string | null;
   isAuthenticated: boolean;
+  /** true quando a sessão acabou por 401/expiração (não por "Sair") — a tela de login avisa. */
+  sessionExpired: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Lê só o `exp` do payload para descartar token vencido no cliente.
-// Não verifica assinatura — quem valida o token de verdade é o backend.
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = token.split('.')[1];
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    const { exp } = JSON.parse(json) as { exp?: number };
-    return typeof exp === 'number' && exp * 1000 <= Date.now();
-  } catch {
-    return true;
-  }
-}
-
-function loadSession(): StoredSession | null {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw) as StoredSession;
-    if (!session.token || isTokenExpired(session.token)) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      return null;
-    }
-    return session;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<StoredSession | null>(loadSession);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // O apiClient encerra a sessão ao receber 401; aqui o React fica sabendo,
+  // e o ProtectedRoute redireciona para /login.
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        setSession(null);
+        setSessionExpired(true);
+      }),
+    [],
+  );
 
   const login = useCallback(async (username: string, password: string) => {
     const { accessToken, user } = await authService.login(username, password);
     const next = { token: accessToken, user };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    saveSession(next);
     setSession(next);
+    setSessionExpired(false);
   }, []);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(STORAGE_KEY);
+    clearSession();
     setSession(null);
+    setSessionExpired(false);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -67,10 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       token: session?.token ?? null,
       isAuthenticated: session !== null && !isTokenExpired(session.token),
+      sessionExpired,
       login,
       logout,
     }),
-    [session, login, logout],
+    [session, sessionExpired, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
