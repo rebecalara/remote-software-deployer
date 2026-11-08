@@ -7,6 +7,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Campo com problema, quando o backend informa (ex.: "installArgs[2]" num 400). */
+    readonly field?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -76,7 +78,8 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, await readErrorMessage(response));
+    const { message, field } = parseErrorBody(await response.text().catch(() => ''), response.status);
+    throw new ApiError(response.status, message, field);
   }
 
   if (response.status === 204) {
@@ -85,19 +88,24 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   return (await response.json()) as T;
 }
 
-// O NestJS devolve { statusCode, message, error }; `message` pode ser string ou lista.
-async function readErrorMessage(response: Response): Promise<string> {
+/**
+ * Lê o corpo de erro do NestJS ({ statusCode, message, error, field? }) — usado pelo
+ * apiFetch e pelo apiUpload. `message` pode ser string ou lista; `field` vem nos 400
+ * de validação do catálogo (ex.: "installArgs[2]").
+ */
+function parseErrorBody(text: string, status: number): { message: string; field?: string } {
   try {
-    const body = (await response.json()) as { message?: string | string[] };
-    if (Array.isArray(body.message)) return body.message.join(' ');
-    if (body.message) return body.message;
+    const body = JSON.parse(text) as { message?: string | string[]; field?: unknown };
+    const field = typeof body.field === 'string' ? body.field : undefined;
+    if (Array.isArray(body.message)) return { message: body.message.join(' '), field };
+    if (body.message) return { message: body.message, field };
   } catch {
     // corpo vazio ou não-JSON (ex.: proxy do Vite com backend fora do ar → 502/504)
   }
-  if (response.status >= 500) {
-    return 'Não foi possível conectar ao servidor. Tente novamente em instantes.';
+  if (status >= 500) {
+    return { message: 'Não foi possível conectar ao servidor. Tente novamente em instantes.' };
   }
-  return `Erro inesperado (${response.status}).`;
+  return { message: `Erro inesperado (${status}).` };
 }
 
 export interface UploadProgress {
@@ -162,7 +170,8 @@ export function apiUpload<T>(path: string, file: Blob, options: UploadOptions = 
       } else if (xhr.status >= 200 && xhr.status < 300) {
         resolve((xhr.responseText ? JSON.parse(xhr.responseText) : undefined) as T);
       } else {
-        reject(new ApiError(xhr.status, errorMessageFromText(xhr.responseText, xhr.status)));
+        const { message, field } = parseErrorBody(xhr.responseText, xhr.status);
+        reject(new ApiError(xhr.status, message, field));
       }
     };
     xhr.onerror = () => {
@@ -178,19 +187,4 @@ export function apiUpload<T>(path: string, file: Blob, options: UploadOptions = 
     // pelo tamanho antes de gravar qualquer coisa.
     xhr.send(file);
   });
-}
-
-// Mesma leitura do readErrorMessage, mas a partir do texto (o XHR não tem Response).
-function errorMessageFromText(text: string, status: number): string {
-  try {
-    const body = JSON.parse(text) as { message?: string | string[] };
-    if (Array.isArray(body.message)) return body.message.join(' ');
-    if (body.message) return body.message;
-  } catch {
-    // corpo vazio ou não-JSON (ex.: proxy do Vite com backend fora do ar → 502/504)
-  }
-  if (status >= 500) {
-    return 'Não foi possível conectar ao servidor. Tente novamente em instantes.';
-  }
-  return `Erro inesperado (${status}).`;
 }
