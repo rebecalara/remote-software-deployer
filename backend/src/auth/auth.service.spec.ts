@@ -8,7 +8,13 @@ import { UserRole } from '@prisma/client';
 describe('AuthService', () => {
   let service: AuthService;
   let ldapService: { bind: jest.Mock };
-  let prisma: { user: { findUnique: jest.Mock } };
+  let prisma: {
+    user: {
+      findUnique: jest.Mock;
+      count: jest.Mock;
+      create: jest.Mock;
+    };
+  };
   let jwtService: { signAsync: jest.Mock };
 
   const fakeUser = {
@@ -22,7 +28,13 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     ldapService = { bind: jest.fn() };
-    prisma = { user: { findUnique: jest.fn() } };
+    prisma = {
+      user: {
+        findUnique: jest.fn(),
+        count: jest.fn(),
+        create: jest.fn(),
+      },
+    };
     jwtService = { signAsync: jest.fn().mockResolvedValue('fake.jwt.token') };
 
     service = new AuthService(
@@ -76,35 +88,56 @@ describe('AuthService', () => {
     await expect(service.login('lrebeca', 'qualquer')).rejects.toThrow(UnauthorizedException);
   });
 
-  it('retorna 401 genérico (Política A) quando o bind funciona mas não há User cadastrado', async () => {
+  it('provisiona automaticamente como ADMIN quando é o primeiro usuário do sistema', async () => {
     ldapService.bind.mockResolvedValue(undefined);
     prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.count.mockResolvedValue(0);
+    prisma.user.create.mockResolvedValue({
+      id: 'user-admin',
+      username: 'primeiro_admin',
+      displayName: 'primeiro_admin',
+      email: null,
+      role: UserRole.ADMIN,
+      createdAt: new Date(),
+    });
 
-    await expect(service.login('lrebeca', 'senha-valida')).rejects.toThrow(
-      UnauthorizedException,
-    );
-    expect(jwtService.signAsync).not.toHaveBeenCalled();
+    const result = await service.login('primeiro_admin', 'senha-valida');
+
+    expect(prisma.user.count).toHaveBeenCalled();
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: {
+        username: 'primeiro_admin',
+        displayName: 'primeiro_admin',
+        role: UserRole.ADMIN,
+      },
+    });
+    expect(result.user.role).toBe(UserRole.ADMIN);
   });
 
-  it('não distingue, na mensagem de erro, credencial inválida de usuário não cadastrado', async () => {
-    ldapService.bind.mockRejectedValue(new LdapAuthenticationError('invalid credentials'));
-    let messageForBadCredential = '';
-    try {
-      await service.login('lrebeca', 'senha-errada');
-    } catch (err) {
-      messageForBadCredential = (err as UnauthorizedException).message;
-    }
-
+  it('provisiona automaticamente como OPERATOR quando outros usuários já existem', async () => {
     ldapService.bind.mockResolvedValue(undefined);
     prisma.user.findUnique.mockResolvedValue(null);
-    let messageForMissingUser = '';
-    try {
-      await service.login('lrebeca', 'senha-valida');
-    } catch (err) {
-      messageForMissingUser = (err as UnauthorizedException).message;
-    }
+    prisma.user.count.mockResolvedValue(2);
+    prisma.user.create.mockResolvedValue({
+      id: 'user-op',
+      username: 'novo_operador',
+      displayName: 'novo_operador',
+      email: null,
+      role: UserRole.OPERATOR,
+      createdAt: new Date(),
+    });
 
-    expect(messageForBadCredential).toBe(messageForMissingUser);
+    const result = await service.login('novo_operador', 'senha-valida');
+
+    expect(prisma.user.count).toHaveBeenCalled();
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: {
+        username: 'novo_operador',
+        displayName: 'novo_operador',
+        role: UserRole.OPERATOR,
+      },
+    });
+    expect(result.user.role).toBe(UserRole.OPERATOR);
   });
 
   it.each([
