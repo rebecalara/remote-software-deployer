@@ -24,7 +24,7 @@ describe('SoftwareController', () => {
       expect(CATALOG_WRITE_ROLES).toEqual([UserRole.ADMIN, UserRole.OPERATOR]);
     });
 
-    it.each(['create', 'update'] as const)('%s usa @CanWriteCatalog (VIEWER fica de fora)', (method) => {
+    it.each(['create', 'update', 'deactivate', 'activate', 'remove'] as const)('%s usa @CanWriteCatalog (VIEWER fica de fora)', (method) => {
       expect(rolesOf(method)).toEqual(CATALOG_WRITE_ROLES);
       expect(rolesOf(method)).not.toContain(UserRole.VIEWER);
     });
@@ -35,12 +35,12 @@ describe('SoftwareController', () => {
   });
 
   describe('rotas', () => {
-    let service: { list: jest.Mock; get: jest.Mock; create: jest.Mock; update: jest.Mock };
+    let service: Record<string, jest.Mock>;
     let controller: SoftwareController;
     const req = { headers: {}, user: { sub: 'user-42', username: 'testuser', role: UserRole.OPERATOR } };
 
     beforeEach(() => {
-      service = { list: jest.fn(), get: jest.fn(), create: jest.fn(), update: jest.fn() };
+      service = { list: jest.fn(), get: jest.fn(), create: jest.fn(), update: jest.fn(), setActive: jest.fn(), remove: jest.fn() };
       controller = new SoftwareController(service as unknown as SoftwareService);
     });
 
@@ -67,6 +67,20 @@ describe('SoftwareController', () => {
         SoftwareValidationError,
       );
       expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it('deactivate e activate passam o estado e o id do usuário do token', () => {
+      controller.deactivate('id-1', req);
+      controller.activate('id-1', req);
+      expect(service.setActive.mock.calls).toEqual([
+        ['id-1', false, 'user-42'],
+        ['id-1', true, 'user-42'],
+      ]);
+    });
+
+    it('DELETE delega ao service', () => {
+      controller.remove('id-1');
+      expect(service.remove).toHaveBeenCalledWith('id-1');
     });
 
     it('PATCH valida só os campos enviados e passa o id do usuário do token', () => {

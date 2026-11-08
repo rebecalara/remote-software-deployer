@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -61,6 +62,29 @@ export class SoftwareController {
     @Req() req: AuthenticatedRequest,
   ): Promise<SoftwareView> {
     return this.softwareService.update(id, validateSoftwareUpdate(body), userIdOf(req));
+  }
+
+  /** Some da seleção de novas implantações; continua no histórico. */
+  @Post(':id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @CanWriteCatalog()
+  deactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
+    return this.softwareService.setActive(id, false, userIdOf(req));
+  }
+
+  @Post(':id/activate')
+  @HttpCode(HttpStatus.OK)
+  @CanWriteCatalog()
+  activate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
+    return this.softwareService.setActive(id, true, userIdOf(req));
+  }
+
+  /** Só software nunca implantado (corrigir cadastro errado); senão 409 → desativar. */
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @CanWriteCatalog()
+  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    return this.softwareService.remove(id);
   }
 }
 

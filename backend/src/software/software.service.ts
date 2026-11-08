@@ -126,6 +126,41 @@ export class SoftwareService {
     }
   }
 
+  /**
+   * Desativa (some da seleção de novas implantações, continua no histórico) ou
+   * reativa. Idempotente: desativar o que já está desativado só devolve o estado.
+   */
+  async setActive(id: string, active: boolean, userId: string): Promise<SoftwareView> {
+    const current = await this.findOrThrow(id);
+    if (current.active === active) return toView(current);
+    const updated = await this.prisma.software.update({
+      where: { id },
+      data: { active, updatedBy: { connect: { id: userId } } },
+      include: softwareInclude,
+    });
+    return toView(updated);
+  }
+
+  /**
+   * Apaga só software NUNCA implantado — existe para corrigir cadastro errado.
+   * Com implantações, a resposta é 409 e o caminho é desativar.
+   */
+  async remove(id: string): Promise<void> {
+    const current = await this.findOrThrow(id);
+    if (current._count.deployments > 0) throw cannotDeleteDeployed();
+
+    try {
+      await this.prisma.software.delete({ where: { id } });
+    } catch (err) {
+      // Corrida rara: uma implantação criada entre a checagem acima e o delete.
+      // O banco recusa (Deployment → Software é RESTRICT); aqui só se garante 409.
+      if (isForeignKeyRestriction(err)) throw cannotDeleteDeployed();
+      throw err;
+    }
+    // O arquivo do instalador passa a ser apagado aqui na etapa do envio
+    // (InstallerStorageService) — até lá nenhum software tem arquivo guardado.
+  }
+
   private async findOrThrow(id: string): Promise<SoftwareWithRelations> {
     const software = await this.prisma.software.findUnique({ where: { id }, include: softwareInclude });
     if (!software) throw new NotFoundException('Software não encontrado.');
@@ -180,6 +215,28 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 function duplicateError(name: string, version: string): ConflictException {
   return new ConflictException(`Já existe um software "${name}" na versão "${version}".`);
+}
+
+function cannotDeleteDeployed(): ConflictException {
+  return new ConflictException(
+    'Este software já foi implantado e não pode ser apagado, para preservar o histórico. ' +
+      'Desative-o em vez de apagar.',
+  );
+}
+
+/**
+ * Exclusão recusada por chave estrangeira. Com onDelete: Restrict, o Postgres
+ * responde 23001 (restrict_violation), que o Prisma 5.22 NÃO mapeia para P2003 —
+ * chega como PrismaClientUnknownRequestError, só identificável pela mensagem
+ * (verificado contra o banco real; ver DECISIONS.md). O P2003 (23503, NO ACTION)
+ * fica tratado também, caso a relação mude.
+ */
+export function isForeignKeyRestriction(err: unknown): boolean {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) return err.code === 'P2003';
+  if (err instanceof Prisma.PrismaClientUnknownRequestError) {
+    return err.message.includes('code: "23001"') || err.message.includes('violates RESTRICT setting');
+  }
+  return false;
 }
 
 // Duas requisições simultâneas podem passar pela checagem e colidir no @@unique.

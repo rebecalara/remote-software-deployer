@@ -239,4 +239,104 @@ describe('SoftwareService', () => {
       });
     });
   });
+
+  describe('setActive (desativar / reativar)', () => {
+    it('desativa e grava quem alterou', async () => {
+      await service.setActive(ID, false, 'user-2');
+      expect(prisma.software.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: ID },
+          data: { active: false, updatedBy: { connect: { id: 'user-2' } } },
+        }),
+      );
+    });
+
+    it('reativa', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ active: false }));
+      await service.setActive(ID, true, USER_ID);
+      expect(prisma.software.update.mock.calls[0][0].data.active).toBe(true);
+    });
+
+    it('é idempotente: já no estado pedido, não grava nada (nem muda updatedBy)', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ active: false }));
+      const view = await service.setActive(ID, false, 'user-2');
+      expect(view.active).toBe(false);
+      expect(prisma.software.update).not.toHaveBeenCalled();
+    });
+
+    it('funciona mesmo depois de implantado (é o caminho no lugar de apagar)', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ _count: { deployments: 5 } }));
+      await expect(service.setActive(ID, false, USER_ID)).resolves.toBeDefined();
+    });
+
+    it('404 quando não existe', async () => {
+      prisma.software.findUnique.mockResolvedValue(null);
+      await expect(service.setActive(ID, false, USER_ID)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('remove (apagar)', () => {
+    // Mensagem REAL do Prisma 5.22 + Postgres, capturada apagando um software com
+    // implantação no banco local (onDelete: Restrict → 23001, sem código Prisma).
+    const restrictError = () =>
+      new Prisma.PrismaClientUnknownRequestError(
+        'Invalid `prisma.software.delete()` invocation:\nError occurred during query execution:\n' +
+          'ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { ' +
+          'code: "23001", message: "update or delete on table \\"Software\\" violates RESTRICT setting of ' +
+          'foreign key constraint \\"Deployment_softwareId_fkey\\" on table \\"Deployment\\"", severity: "ERROR", ' +
+          'detail: Some("Key (id)=(c27e8dce-3047-4fbd-9533-362e1fc8e984) is referenced from table ' +
+          '\\"Deployment\\"."), column: None, hint: None }), transient: false })',
+        { clientVersion: '5.22.0' },
+      );
+
+    beforeEach(() => {
+      (prisma.software as Record<string, jest.Mock>).delete = jest.fn().mockResolvedValue(row());
+    });
+    const deleteMock = () => (prisma.software as Record<string, jest.Mock>).delete;
+
+    it('apaga software nunca implantado', async () => {
+      await service.remove(ID);
+      expect(deleteMock()).toHaveBeenCalledWith({ where: { id: ID } });
+    });
+
+    it('409 com orientação para desativar quando já foi implantado — nem tenta apagar', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ _count: { deployments: 1 } }));
+      const error = await service.remove(ID).catch((e) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(error.message).toContain('Desative-o em vez de apagar');
+      expect(deleteMock()).not.toHaveBeenCalled();
+    });
+
+    it('409 na corrida: o banco recusa com 23001 (erro sem código Prisma, formato real)', async () => {
+      deleteMock().mockRejectedValue(restrictError());
+      const error = await service.remove(ID).catch((e) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(error.message).toContain('Desative-o em vez de apagar');
+    });
+
+    it('409 também se vier como P2003 (relação com NO ACTION)', async () => {
+      deleteMock().mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+          code: 'P2003',
+          clientVersion: '5.22.0',
+        }),
+      );
+      await expect(service.remove(ID)).rejects.toThrow(ConflictException);
+    });
+
+    it('outros erros do banco não viram 409 (não mascarar falha real)', async () => {
+      deleteMock().mockRejectedValue(
+        new Prisma.PrismaClientUnknownRequestError('connection reset', { clientVersion: '5.22.0' }),
+      );
+      const error = await service.remove(ID).catch((e) => e);
+      expect(error).not.toBeInstanceOf(ConflictException);
+      expect(error.message).toBe('connection reset');
+    });
+
+    it('404 quando não existe', async () => {
+      prisma.software.findUnique.mockResolvedValue(null);
+      await expect(service.remove(ID)).rejects.toThrow(NotFoundException);
+      expect(deleteMock()).not.toHaveBeenCalled();
+    });
+  });
 });
