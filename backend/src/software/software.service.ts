@@ -1,6 +1,22 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnApplicationBootstrap,
+  PayloadTooLargeException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InstallType, Prisma } from '@prisma/client';
+import type { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  InstallerStorageService,
+  InstallerStorageUnavailableError,
+  InstallerTooLargeError,
+  InvalidInstallerHeaderError,
+} from './installer-storage.service';
 import { SoftwareCreateInput, SoftwareUpdateInput, validateInstallArgs } from './software-validation';
 
 export interface UserRef {
@@ -49,8 +65,18 @@ const softwareInclude = {
 type SoftwareWithRelations = Prisma.SoftwareGetPayload<{ include: typeof softwareInclude }>;
 
 @Injectable()
-export class SoftwareService {
-  constructor(private readonly prisma: PrismaService) {}
+export class SoftwareService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(SoftwareService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: InstallerStorageService,
+  ) {}
+
+  /** Limite de tamanho do instalador, para o controller recusar pelo Content-Length. */
+  get maxInstallerSizeBytes(): number {
+    return this.storage.maxSizeBytes;
+  }
 
   async list(options: { includeInactive?: boolean } = {}): Promise<SoftwareView[]> {
     const rows = await this.prisma.software.findMany({
@@ -157,8 +183,103 @@ export class SoftwareService {
       if (isForeignKeyRestriction(err)) throw cannotDeleteDeployed();
       throw err;
     }
-    // O arquivo do instalador passa a ser apagado aqui na etapa do envio
-    // (InstallerStorageService) — até lá nenhum software tem arquivo guardado.
+    // Registro apagado primeiro: se apagar o arquivo falhar, sobra um órfão no disco
+    // (avisado na próxima subida), nunca um registro apontando para arquivo sumido.
+    if (current.installerFileName) await this.deleteFileQuietly(current.installerFileName);
+  }
+
+  /**
+   * Recebe o instalador (corpo binário, em stream) e o associa ao software. Também
+   * serve para TROCAR o arquivo — só antes da primeira implantação.
+   *
+   * Ordem que impede arquivo órfão e registro quebrado: grava o arquivo novo →
+   * atualiza o registro SÓ se ele ainda aponta para o arquivo de antes (detecta
+   * envio simultâneo) → apaga o arquivo antigo. Se o registro não for atualizado,
+   * o arquivo novo é apagado.
+   */
+  async uploadInstaller(
+    id: string,
+    source: Readable,
+    originalName: string,
+    userId: string,
+  ): Promise<SoftwareView> {
+    if (!this.storage.isAvailable) {
+      throw new ServiceUnavailableException(
+        'Envio de instaladores indisponível: armazenamento não configurado no servidor.',
+      );
+    }
+    const current = await this.findOrThrow(id);
+    if (current._count.deployments > 0) {
+      throw new ConflictException(
+        'Este software já foi implantado: o instalador não pode mais ser trocado. Cadastre uma nova versão.',
+      );
+    }
+
+    const saved = await this.storage.save(source, current.installType).catch((err) => {
+      throw toHttpUploadError(err);
+    });
+
+    let updated: Prisma.BatchPayload;
+    try {
+      updated = await this.prisma.software.updateMany({
+        where: { id, installerFileName: current.installerFileName },
+        data: {
+          installerFileName: saved.fileName,
+          installerOriginalName: originalName,
+          installerSizeBytes: saved.sizeBytes,
+          installerSha256: saved.sha256,
+          installerUploadedAt: new Date(),
+          updatedById: userId,
+        },
+      });
+    } catch (err) {
+      await this.deleteFileQuietly(saved.fileName);
+      throw err;
+    }
+    if (updated.count === 0) {
+      // Outro envio trocou o arquivo (ou o software foi apagado) enquanto este gravava.
+      await this.deleteFileQuietly(saved.fileName);
+      throw new ConflictException('O instalador foi alterado por outro envio ao mesmo tempo. Tente de novo.');
+    }
+
+    if (current.installerFileName) await this.deleteFileQuietly(current.installerFileName);
+    return this.get(id);
+  }
+
+  /**
+   * Na subida, confere a pasta contra o banco — só AVISA, nunca apaga (decisão da
+   * autora): arquivo sem registro (órfão) e registro sem arquivo (instalador sumiu
+   * do disco; implantar esse software falharia no Bloco 4).
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    if (!this.storage.isAvailable) return;
+    const [files, rows] = await Promise.all([
+      this.storage.listFiles(),
+      this.prisma.software.findMany({
+        where: { installerFileName: { not: null } },
+        select: { name: true, version: true, installerFileName: true },
+      }),
+    ]);
+    const referenced = new Set(rows.map((r) => r.installerFileName));
+    const onDisk = new Set(files);
+
+    const orphans = files.filter((f) => !referenced.has(f));
+    if (orphans.length > 0) {
+      this.logger.warn(
+        `${orphans.length} instalador(es) na pasta sem registro no banco (não apagados): ${orphans.join(', ')}`,
+      );
+    }
+    for (const row of rows.filter((r) => !onDisk.has(r.installerFileName!))) {
+      this.logger.warn(`Instalador de "${row.name} ${row.version}" não encontrado na pasta: ${row.installerFileName}`);
+    }
+  }
+
+  private async deleteFileQuietly(fileName: string): Promise<void> {
+    try {
+      await this.storage.delete(fileName);
+    } catch (err) {
+      this.logger.warn(`Não foi possível apagar o instalador ${fileName}: ${(err as Error).message}`);
+    }
   }
 
   private async findOrThrow(id: string): Promise<SoftwareWithRelations> {
@@ -215,6 +336,14 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 function duplicateError(name: string, version: string): ConflictException {
   return new ConflictException(`Já existe um software "${name}" na versão "${version}".`);
+}
+
+/** Erros do armazenamento → resposta HTTP. Outros (conexão caída, disco cheio) seguem como estão. */
+function toHttpUploadError(err: unknown): unknown {
+  if (err instanceof InstallerTooLargeError) return new PayloadTooLargeException(err.message);
+  if (err instanceof InvalidInstallerHeaderError) return new BadRequestException(err.message);
+  if (err instanceof InstallerStorageUnavailableError) return new ServiceUnavailableException(err.message);
+  return err;
 }
 
 function cannotDeleteDeployed(): ConflictException {
