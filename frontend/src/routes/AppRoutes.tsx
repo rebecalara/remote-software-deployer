@@ -3,6 +3,7 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { LoginPage } from '../pages/Login/LoginPage';
 import { DashboardPage } from '../pages/Dashboard/DashboardPage';
 import { MachinesPage } from '../pages/Machines/MachinesPage';
+import { SoftwarePage } from '../pages/Software/SoftwarePage';
 import { ProtectedRoute } from './ProtectedRoute';
 
 export function AppRoutes() {
@@ -14,6 +15,7 @@ export function AppRoutes() {
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/machines" element={<MachinesPage />} />
+          <Route path="/software" element={<SoftwarePage />} />
         </Route>
       </Route>
 

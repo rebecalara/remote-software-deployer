@@ -1,5 +1,10 @@
 import { apiFetch, apiUpload, type UploadOptions } from './apiClient';
-import type { Software, SoftwareCreateInput, SoftwareUpdateInput } from '../types/software';
+import type { InstallerLimits, Software, SoftwareCreateInput, SoftwareUpdateInput } from '../types/software';
+
+/** Limite de tamanho e se o envio está disponível no servidor. */
+export function getInstallerLimits(): Promise<InstallerLimits> {
+  return apiFetch<InstallerLimits>('/software/installer-limits');
+}
 
 /** Por padrão só os ativos; includeInactive traz também os desativados. */
 export function listSoftware(includeInactive = false): Promise<Software[]> {

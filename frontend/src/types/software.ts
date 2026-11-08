@@ -44,3 +44,10 @@ export interface SoftwareCreateInput {
 }
 
 export type SoftwareUpdateInput = Partial<SoftwareCreateInput>;
+
+/** GET /software/installer-limits — para conferir o arquivo antes de enviar. */
+export interface InstallerLimits {
+  maxSizeBytes: number;
+  /** false = pasta de instaladores não configurada no servidor: envio desativado. */
+  storageAvailable: boolean;
+}
