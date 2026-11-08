@@ -16,10 +16,19 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
-  async login(username: string, password: string): Promise<LoginResponse> {
-    const normalizedUsername = username?.trim();
-    if (!normalizedUsername || !password) {
-      throw new BadRequestException('Usuário e senha são obrigatórios.');
+  async login(username: unknown, password: unknown): Promise<LoginResponse> {
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      throw new BadRequestException(
+        'Usuário e senha devem ser textos válidos.',
+      );
+    }
+
+    const normalizedUsername = username.trim();
+
+    if (!normalizedUsername || password.length === 0) {
+      throw new BadRequestException(
+        'Usuário e senha são obrigatórios.',
+      );
     }
 
     await this.authenticateAgainstLdap(normalizedUsername, password);
