@@ -6,7 +6,13 @@ import { ROLES_KEY } from '../auth/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { PassThrough, Readable } from 'node:stream';
-import { CATALOG_WRITE_ROLES, discardLimit, discardRemainingBody, SoftwareController } from './software.controller';
+import {
+  CATALOG_WRITE_ROLES,
+  DISCARD_CEILING_FACTOR,
+  discardLimit,
+  discardRemainingBody,
+  SoftwareController,
+} from './software.controller';
 import { SoftwareService } from './software.service';
 import { SoftwareValidationError } from './software-validation';
 import { SoftwareValidationFilter } from './software-validation.filter';
@@ -165,13 +171,24 @@ describe('SoftwareController', () => {
     });
 
     describe('discardLimit', () => {
+      const MB = 1024 * 1024;
+      const LIMIT = 500 * MB;
+
       it.each([
-        ['600 MB declarados', String(600 * 1024 * 1024), 600 * 1024 * 1024],
-        ['sem Content-Length (em partes)', undefined, 500],
-        ['Content-Length inválido', 'abc', 500],
-        ['Content-Length 0', '0', 500],
-      ])('%s → teto %p', (_caso, header, expected) => {
-        expect(discardLimit(header, 500)).toBe(expected);
+        ['600 MB declarados (um pouco acima do limite)', String(600 * MB), 600 * MB],
+        ['exatamente 2× o limite', String(1000 * MB), 1000 * MB],
+        ['1 byte acima de 2× o limite', String(1000 * MB + 1), 1000 * MB],
+        ['100 GB declarados', String(100 * 1024 * MB), 1000 * MB],
+        ['sem Content-Length (em partes)', undefined, LIMIT],
+        ['Content-Length inválido', 'abc', LIMIT],
+        ['Content-Length 0', '0', LIMIT],
+      ])('%s → teto %p bytes', (_caso, header, expected) => {
+        expect(discardLimit(header, LIMIT)).toBe(expected);
+      });
+
+      it('o teto fixo é 2× o limite e acompanha o limite configurado', () => {
+        expect(DISCARD_CEILING_FACTOR).toBe(2);
+        expect(discardLimit(String(100 * 1024 * MB), 5 * MB)).toBe(10 * MB);
       });
     });
 

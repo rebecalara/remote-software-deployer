@@ -148,13 +148,24 @@ export function discardRemainingBody(req: Readable, maxBytes: number): void {
 }
 
 /**
- * Teto do descarte: com Content-Length, o tamanho declarado (finito, e é o que o
- * cliente vai enviar — cortar antes faria ele levar reset e não ler o 413); sem
- * ele (envio em partes), o limite de tamanho.
+ * Quanto o descarte aceita ler no máximo, em múltiplos do limite de tamanho. Sem
+ * teto fixo, quem declarasse 100 GB faria o servidor ler e jogar fora 100 GB
+ * (limitado só pelo requestTimeout). Com 2×: um arquivo um pouco acima do limite
+ * (ex.: 600 MB com limite de 500) ainda recebe o 413 com a mensagem; acima de
+ * 2×, a conexão é fechada e o cliente leva reset — o frontend nunca chega lá,
+ * porque confere o tamanho antes de enviar. Ver DECISIONS.md.
+ */
+export const DISCARD_CEILING_FACTOR = 2;
+
+/**
+ * Teto do descarte: com Content-Length, o tamanho declarado (é o que o cliente vai
+ * enviar — cortar antes faria ele levar reset e não ler o 413), mas nunca acima de
+ * 2× o limite; sem Content-Length (envio em partes), o limite de tamanho.
  */
 export function discardLimit(contentLength: string | undefined, maxBytes: number): number {
   const declared = Number(contentLength);
-  return Number.isInteger(declared) && declared > 0 ? declared : maxBytes;
+  const wanted = Number.isInteger(declared) && declared > 0 ? declared : maxBytes;
+  return Math.min(wanted, maxBytes * DISCARD_CEILING_FACTOR);
 }
 
 // O JwtAuthGuard roda antes e sempre preenche request.user; o `sub` é o id do User.
