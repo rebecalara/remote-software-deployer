@@ -106,4 +106,37 @@ describe('AuthService', () => {
 
     expect(messageForBadCredential).toBe(messageForMissingUser);
   });
+
+  it.each([
+    ['número', 123],
+    ['booleano', true],
+    ['objeto', { nome: 'usuario' }],
+    ['array', ['usuario']],
+  ])('rejeita username do tipo %s com HTTP 400', async (_tipo, username) => {
+    await expect(
+      service.login(username, 'senha123'),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(ldapService.bind).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['número', 123],
+    ['booleano', true],
+    ['objeto', { senha: '123' }],
+    ['array', ['senha123']],
+    ['nulo', null],
+  ])('rejeita password do tipo %s com HTTP 400', async (_tipo, password) => {
+    await expect(
+      service.login('usuario', password),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(ldapService.bind).not.toHaveBeenCalled();
+  });
+  it('rejeita username contendo apenas espaços', async () => {
+    await expect(
+      service.login('   ', 'senha123'),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(ldapService.bind).not.toHaveBeenCalled();
+  });
 });
