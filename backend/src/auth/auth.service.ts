@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LdapAuthenticationError, LdapConnectionError, LdapService } from '../ldap/ldap.service';
 import { JwtPayload, LoginResponse } from './auth.types';
@@ -33,16 +34,12 @@ export class AuthService {
 
     await this.authenticateAgainstLdap(normalizedUsername, password);
 
-    const user = await this.prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findUnique({
       where: { username: normalizedUsername },
     });
 
-    if (!user) {
-      this.logger.warn(
-        `Bind LDAP ok para "${normalizedUsername}", mas não há User cadastrado no sistema.`,
-      );
-      throw new UnauthorizedException(GENERIC_AUTH_ERROR);
-    }
+    const user =
+      existingUser ?? (await this.provisionUser(normalizedUsername));
 
     const payload: JwtPayload = {
       sub: user.id,
@@ -60,6 +57,22 @@ export class AuthService {
         role: user.role,
       },
     };
+  }
+
+  private async provisionUser(username: string) {
+    const totalUsers = await this.prisma.user.count();
+    const role = totalUsers === 0 ? UserRole.ADMIN : UserRole.OPERATOR;
+    const user = await this.prisma.user.create({
+      data: {
+        username,
+        displayName: username,
+        role,
+      },
+    });
+    this.logger.log(
+      `Usuário "${username}" provisionado automaticamente com perfil ${role}.`,
+    );
+    return user;
   }
 
   private async authenticateAgainstLdap(username: string, password: string): Promise<void> {
