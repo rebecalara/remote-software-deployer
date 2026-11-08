@@ -50,6 +50,13 @@ export interface SoftwareView {
   updatedBy: UserRef | null;
 }
 
+export interface InstallerLimits {
+  /** Tamanho máximo de um instalador, em bytes (INSTALLER_MAX_SIZE_MB). */
+  maxSizeBytes: number;
+  /** false = pasta de instaladores não configurada: o envio responde 503. */
+  storageAvailable: boolean;
+}
+
 // Campos que definem O QUE é instalado. Depois da primeira implantação, mudá-los
 // faria o histórico dizer que "7-Zip 23.01" instalou outra coisa — cadastra-se uma
 // nova versão em vez disso. name e vendor continuam editáveis.
@@ -76,6 +83,14 @@ export class SoftwareService implements OnApplicationBootstrap {
   /** Limite de tamanho do instalador, para o controller recusar pelo Content-Length. */
   get maxInstallerSizeBytes(): number {
     return this.storage.maxSizeBytes;
+  }
+
+  /**
+   * Para a tela conferir o arquivo ANTES de enviar (evita transferir à toa um
+   * arquivo que seria recusado) e avisar se o envio está desativado no servidor.
+   */
+  getInstallerLimits(): InstallerLimits {
+    return { maxSizeBytes: this.storage.maxSizeBytes, storageAvailable: this.storage.isAvailable };
   }
 
   async list(options: { includeInactive?: boolean } = {}): Promise<SoftwareView[]> {

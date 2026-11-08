@@ -98,6 +98,17 @@ describe('SoftwareService', () => {
     );
   });
 
+  describe('getInstallerLimits', () => {
+    it('devolve o limite de tamanho e se o armazenamento está configurado', () => {
+      expect(service.getInstallerLimits()).toEqual({ maxSizeBytes: 500 * 1024 * 1024, storageAvailable: true });
+    });
+
+    it('armazenamento não configurado: storageAvailable false (a tela avisa antes de enviar)', () => {
+      storage.isAvailable = false;
+      expect(service.getInstallerLimits().storageAvailable).toBe(false);
+    });
+  });
+
   describe('list', () => {
     it('por padrão lista só os ativos, por nome e versão', async () => {
       await service.list();

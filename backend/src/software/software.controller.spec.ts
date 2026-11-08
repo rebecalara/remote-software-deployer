@@ -1,6 +1,6 @@
 import { ArgumentsHost } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { UserRole } from '@prisma/client';
 import { ROLES_KEY } from '../auth/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -36,8 +36,18 @@ describe('SoftwareController', () => {
       expect(rolesOf(method)).not.toContain(UserRole.VIEWER);
     });
 
-    it.each(['list', 'get'] as const)('%s é leitura: qualquer usuário logado', (method) => {
+    it.each(['list', 'get', 'installerLimits'] as const)('%s é leitura: qualquer usuário logado', (method) => {
       expect(rolesOf(method)).toBeUndefined();
+    });
+  });
+
+  describe('ordem das rotas', () => {
+    it('GET installer-limits é declarada ANTES de GET :id (senão :id a capturaria → 400 do ParseUUIDPipe)', () => {
+      // O Nest registra as rotas na ordem dos métodos da classe (MetadataScanner).
+      const methods = Object.getOwnPropertyNames(SoftwareController.prototype);
+      expect(methods.indexOf('installerLimits')).toBeGreaterThan(-1);
+      expect(methods.indexOf('installerLimits')).toBeLessThan(methods.indexOf('get'));
+      expect(Reflect.getMetadata(PATH_METADATA, SoftwareController.prototype.installerLimits)).toBe('installer-limits');
     });
   });
 
@@ -47,7 +57,7 @@ describe('SoftwareController', () => {
     const req = { headers: {}, user: { sub: 'user-42', username: 'testuser', role: UserRole.OPERATOR } };
 
     beforeEach(() => {
-      service = { list: jest.fn(), get: jest.fn(), create: jest.fn(), update: jest.fn(), setActive: jest.fn(), remove: jest.fn(), uploadInstaller: jest.fn() };
+      service = { list: jest.fn(), get: jest.fn(), create: jest.fn(), update: jest.fn(), setActive: jest.fn(), remove: jest.fn(), uploadInstaller: jest.fn(), getInstallerLimits: jest.fn() };
       Object.defineProperty(service, 'maxInstallerSizeBytes', { value: 1024 * 1024 });
       controller = new SoftwareController(service as unknown as SoftwareService);
     });
@@ -84,6 +94,11 @@ describe('SoftwareController', () => {
         ['id-1', false, 'user-42'],
         ['id-1', true, 'user-42'],
       ]);
+    });
+
+    it('GET installer-limits devolve os limites do service', () => {
+      service.getInstallerLimits.mockReturnValue({ maxSizeBytes: 500, storageAvailable: true });
+      expect(controller.installerLimits()).toEqual({ maxSizeBytes: 500, storageAvailable: true });
     });
 
     it('DELETE delega ao service', () => {

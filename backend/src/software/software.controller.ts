@@ -22,7 +22,7 @@ import { JwtPayload } from '../auth/auth.types';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { SoftwareService, SoftwareView } from './software.service';
+import { InstallerLimits, SoftwareService, SoftwareView } from './software.service';
 import { validateSoftwareCreate, validateSoftwareUpdate } from './software-validation';
 import { parseInstallerUploadHeaders } from './installer-upload-headers';
 import { SoftwareValidationFilter } from './software-validation.filter';
@@ -45,6 +45,19 @@ export class SoftwareController {
   @Get()
   list(@Query('includeInactive') includeInactive?: string): Promise<SoftwareView[]> {
     return this.softwareService.list({ includeInactive: includeInactive === 'true' });
+  }
+
+  /**
+   * Limites do envio do instalador, para a tela conferir o arquivo antes de enviar.
+   * Leitura para qualquer usuário logado.
+   *
+   * PRECISA ficar declarada ANTES de @Get(':id'): o Express testa as rotas na ordem
+   * de declaração, e ':id' capturaria "installer-limits" (o ParseUUIDPipe
+   * responderia 400).
+   */
+  @Get('installer-limits')
+  installerLimits(): InstallerLimits {
+    return this.softwareService.getInstallerLimits();
   }
 
   @Get(':id')
