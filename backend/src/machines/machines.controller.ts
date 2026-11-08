@@ -16,7 +16,7 @@ export class MachinesController {
   ) {}
 
   @Get()
-  list(@Query('search') search?: string): Promise<MachineListResponse> {
+  list(@Query('search') search?: unknown): Promise<MachineListResponse> {
     return this.machinesService.list(search);
   }
 

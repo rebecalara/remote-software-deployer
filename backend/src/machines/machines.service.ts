@@ -24,8 +24,12 @@ export class MachinesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Lê só do banco — o frontend nunca dispara busca no LDAP por aqui. */
-  async list(search?: string): Promise<MachineListResponse> {
-    const term = search?.trim();
+  async list(search?: unknown): Promise<MachineListResponse> {
+    // A query não é validada em tempo de execução, e o Express 5 entrega um
+    // parâmetro repetido (?search=a&search=b) como array. Sem checar o tipo,
+    // .trim() lança TypeError e a listagem responde 500 em vez de ignorar o
+    // parâmetro. Mesmo motivo da correção feita em AuthService.login.
+    const term = typeof search === 'string' ? search.trim() : undefined;
     const where: Prisma.MachineWhereInput = term
       ? {
           OR: [
