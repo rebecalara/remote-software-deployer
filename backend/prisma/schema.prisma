@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+enum DeploymentStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// SCRIPT removido de propósito: "instalar via script" seria execução arbitrária
+// (regra do projeto). O comando-base é sempre decidido pelo tipo.
+enum InstallType {
+  MSI
+  EXE
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  displayName String
+  email       String?
+  role        UserRole
+  createdAt   DateTime @default(now())
+
+  deployments     Deployment[]
+  softwareCreated Software[]   @relation("SoftwareCreatedBy")
+  softwareUpdated Software[]   @relation("SoftwareUpdatedBy")
+}
+
+model Machine {
+  id              String        @id @default(uuid())
+  hostname        String        @unique
+  ipAddress       String?
+  operatingSystem String?
+  department      String?
+  status          MachineStatus @default(UNKNOWN)
+  lastSync        DateTime?
+
+  targets DeploymentTarget[]
+}
+
+model Software {
+  id          String      @id @default(uuid())
+  name        String
+  version     String
+  vendor      String?
+  installType InstallType
+  // Tokens passados como parâmetros ao instalador — nunca uma linha de comando.
+  installArgs String[]    @default([])
+  active      Boolean     @default(true)
+
+  // Instalador: preenchido pelo servidor no envio (PUT /software/:id/installer),
+  // nunca digitado. Opcional porque o cadastro (JSON) vem antes do arquivo.
+  installerFileName     String?   @unique // "<uuid>.msi" | "<uuid>.exe"
+  installerOriginalName String? // só para exibição
+  installerSizeBytes    Int? // Int (não BigInt): limite de envio travado em 2000 MB
+  installerSha256       String? // calculado no envio
+  installerUploadedAt   DateTime?
+
+  // Auditoria (RN06 / RNF09): quem cadastrou e quem alterou por último.
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?        @relation("SoftwareCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy   User?        @relation("SoftwareUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deployments Deployment[]
+
+  @@unique([name, version])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model Deployment {
+  id         String           @id @default(uuid())
+  name       String
+  userId     String
+  softwareId String
+  status     DeploymentStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  user     User               @relation(fields: [userId], references: [id])
+  software Software           @relation(fields: [softwareId], references: [id])
+  targets  DeploymentTarget[]
+
+  @@index([userId])
+  @@index([softwareId])
+}
+
+model DeploymentTarget {
+  id           String           @id @default(uuid())
+  deploymentId String
+  machineId    String
+  status       DeploymentStatus @default(PENDING)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  deployment Deployment      @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  machine    Machine         @relation(fields: [machineId], references: [id])
+  logs       DeploymentLog[]
+
+  @@unique([deploymentId, machineId])
+  @@index([machineId])
+}
+
+model DeploymentLog {
+  id                 String   @id @default(uuid())
+  deploymentTargetId String
+  timestamp          DateTime @default(now())
+  level              LogLevel
+  message            String
+
+  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentTargetId, timestamp])
+}
