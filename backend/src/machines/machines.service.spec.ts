@@ -88,4 +88,15 @@ describe('MachinesService', () => {
     await service.list('   ');
     expect(prisma.machine.findMany.mock.calls[0][0].where).toEqual({});
   });
+
+  it.each([
+    ['array (parâmetro repetido na query)', ['a', 'b']],
+    ['número', 123],
+    ['booleano', true],
+    ['objeto', { busca: 'a' }],
+    ['nulo', null],
+  ])('busca do tipo %s é ignorada, sem derrubar a requisição', async (_tipo, search) => {
+    await expect(service.list(search)).resolves.toBeDefined();
+    expect(prisma.machine.findMany.mock.calls[0][0].where).toEqual({});
+  });
 });
