@@ -21,6 +21,10 @@ export interface LdapEntry {
   attributes: Record<string, string[]>;
 }
 
+export function escapeDnValue(value: string): string {
+  return value.replace(/([\\,#+<>;"= ])/g, '\\$1');
+}
+
 @Injectable()
 export class LdapService {
   private readonly logger = new Logger(LdapService.name);
@@ -30,7 +34,8 @@ export class LdapService {
     if (!template) {
       throw new Error('LDAP_BIND_DN_TEMPLATE não configurado no ambiente.');
     }
-    return template.replace('{{username}}', username);
+    const safeUsername = escapeDnValue(username);
+    return template.replace('{{username}}', () => safeUsername);
   }
 
   async bind(username: string, password: string): Promise<void> {

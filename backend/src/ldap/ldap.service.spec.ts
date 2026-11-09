@@ -39,6 +39,14 @@ describe('LdapService', () => {
         'LDAP_BIND_DN_TEMPLATE não configurado',
       );
     });
+
+    it('escapa caracteres especiais de DN (RFC 4514) para prevenir LDAP Injection', () => {
+      process.env.LDAP_BIND_DN_TEMPLATE =
+        'uid={{username}},ou=people,dc=rsd,dc=local';
+      expect(service.buildBindDn('admin,ou=admins')).toBe(
+        'uid=admin\\,ou\\=admins,ou=people,dc=rsd,dc=local',
+      );
+    });
   });
 
   describe('bind', () => {
