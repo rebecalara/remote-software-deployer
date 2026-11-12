@@ -19,6 +19,16 @@ export interface MachineListResponse {
   lastSyncAt: string | null;
 }
 
+/**
+ * A máquina apareceu na sincronização mais recente? Toda sincronização grava o mesmo
+ * lastSync em todas as máquinas que encontrou, então "vista" = lastSync igual ao
+ * maior lastSync do banco. Usado também pela implantação (Bloco 4), que só aceita
+ * máquinas presentes no AD.
+ */
+export function isSeenInLastSync(lastSync: Date | null, lastSyncAt: Date | null): boolean {
+  return lastSyncAt !== null && lastSync !== null && lastSync.getTime() === lastSyncAt.getTime();
+}
+
 @Injectable()
 export class MachinesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -58,8 +68,7 @@ export class MachinesService {
         department: m.department,
         status: m.status,
         lastSync: m.lastSync?.toISOString() ?? null,
-        seenInLastSync:
-          lastSyncAt !== null && m.lastSync !== null && m.lastSync.getTime() === lastSyncAt.getTime(),
+        seenInLastSync: isSeenInLastSync(m.lastSync, lastSyncAt),
       })),
     };
   }

@@ -245,7 +245,21 @@ describe('InstallerStorageService', () => {
     ])('recusa nome que não foi gerado pelo sistema: %p', async (name) => {
       const service = await createService();
       expect(() => service.openRead(name)).toThrow(InvalidStoredFileNameError);
+      expect(() => service.localPath(name)).toThrow(InvalidStoredFileNameError);
+      await expect(service.exists(name)).rejects.toThrow(InvalidStoredFileNameError);
       await expect(service.delete(name)).rejects.toThrow(InvalidStoredFileNameError);
+    });
+
+    it('localPath e exists apontam para o arquivo guardado (para o executor do Bloco 4)', async () => {
+      const service = await createService();
+      const { fileName } = await service.save(chunked(fakeInstaller(MZ, 1000)).stream, 'EXE');
+
+      const path = service.localPath(fileName);
+      expect(sha256(await fsp.readFile(path))).toBe(sha256(fakeInstaller(MZ, 1000)));
+      expect(await service.exists(fileName)).toBe(true);
+
+      await service.delete(fileName);
+      expect(await service.exists(fileName)).toBe(false);
     });
 
     it('listFiles só devolve instaladores guardados (ignora .tmp e arquivos estranhos)', async () => {

@@ -119,9 +119,28 @@ export class InstallerStorageService implements OnModuleInit {
     return { fileName, sizeBytes: inspector.bytes, sha256: inspector.digest() };
   }
 
-  /** Para o Bloco 4 copiar o arquivo até a máquina. Nenhuma rota HTTP usa isto. */
+  /** Leitura em stream do arquivo guardado. Nenhuma rota HTTP usa isto. */
   openRead(fileName: string): ReadStream {
     return createReadStream(this.pathFor(fileName));
+  }
+
+  /**
+   * Caminho local do arquivo, para o executor do Bloco 4 (o PowerShell copia daqui
+   * para a máquina de destino por SMB). Mesma defesa do pathFor: só nomes gerados
+   * pelo sistema. Nenhuma rota HTTP usa isto.
+   */
+  localPath(fileName: string): string {
+    return this.pathFor(fileName);
+  }
+
+  /** O arquivo guardado existe? (o registro no banco pode existir sem ele) */
+  async exists(fileName: string): Promise<boolean> {
+    try {
+      return (await fsp.stat(this.pathFor(fileName))).isFile();
+    } catch (err) {
+      if (err instanceof InvalidStoredFileNameError || err instanceof InstallerStorageUnavailableError) throw err;
+      return false;
+    }
   }
 
   /** Idempotente: não falha se o arquivo já não existir. */
