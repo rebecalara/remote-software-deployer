@@ -124,6 +124,10 @@ model DeploymentTarget {
   status       DeploymentStatus @default(PENDING)
   startedAt    DateTime?
   finishedAt   DateTime?
+  /// Código de saída do instalador na máquina de destino (RF09). Nulo enquanto
+  /// não executou, ou quando a falha aconteceu antes da execução (conexão,
+  /// cópia, hash, tempo esgotado).
+  exitCode     Int?
 
   deployment Deployment      @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
   machine    Machine         @relation(fields: [machineId], references: [id])
