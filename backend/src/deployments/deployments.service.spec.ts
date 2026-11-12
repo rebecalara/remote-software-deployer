@@ -53,8 +53,8 @@ function setup() {
         software: { id: SW_ID, name: '7-Zip', version: '26.06', installType: 'MSI' },
         user: { username: 'testuser', displayName: 'Test User' },
         targets: [
-          { id: 't-1', machineId: M1, status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null, machine: { hostname: 'WS-002' } },
-          { id: 't-2', machineId: M2, status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null, machine: { hostname: 'WS-001' } },
+          { id: 't-1', machineId: M1, status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null, machine: { hostname: 'WS-002' }, logs: [] },
+          { id: 't-2', machineId: M2, status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null, machine: { hostname: 'WS-001' }, logs: [] },
         ],
       })),
     },
@@ -90,8 +90,17 @@ describe('DeploymentsService.create', () => {
     expect(view).toMatchObject({ id: 'dep-1', status: 'PENDING', requestedBy: { username: 'testuser' } });
     expect(view.targets.map((t) => t.hostname)).toEqual(['WS-001', 'WS-002']); // ordenado por nome
     expect(view.targets[0]).toEqual({
-      id: 't-2', machineId: M2, hostname: 'WS-001', status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null,
+      id: 't-2', machineId: M2, hostname: 'WS-001', status: 'PENDING', startedAt: null, finishedAt: null, exitCode: null, lastLog: null,
     });
+  });
+
+  it('enfileira na ordem da seleção, não na ordem em que o banco devolve os alvos', async () => {
+    const { runner, service } = setup();
+    await service.create(input({ machineIds: [M2, M1] }), 'user-1');
+    expect(runner.enqueue).toHaveBeenCalledWith([
+      { targetId: 't-2', machineId: M2 },
+      { targetId: 't-1', machineId: M1 },
+    ]);
   });
 
   it('usa o nome informado e o singular para uma máquina', async () => {
