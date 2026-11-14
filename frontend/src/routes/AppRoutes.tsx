@@ -5,6 +5,7 @@ import { MachinesPage } from '../pages/Machines/MachinesPage';
 import { SoftwarePage } from '../pages/Software/SoftwarePage';
 import { NewDeploymentPage } from '../pages/Deployments/NewDeploymentPage';
 import { DeploymentDetailsPage } from '../pages/Deployments/DeploymentDetailsPage';
+import { MonitoringPage } from '../pages/Monitoring/MonitoringPage';
 import { ProtectedRoute } from './ProtectedRoute';
 
 export function AppRoutes() {
@@ -14,6 +15,7 @@ export function AppRoutes() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
+          <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/machines" element={<MachinesPage />} />
           <Route path="/software" element={<SoftwarePage />} />
           <Route path="/deployments/new" element={<NewDeploymentPage />} />
@@ -21,7 +23,7 @@ export function AppRoutes() {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/machines" replace />} />
+      <Route path="*" element={<Navigate to="/monitoring" replace />} />
     </Routes>
   );
 }

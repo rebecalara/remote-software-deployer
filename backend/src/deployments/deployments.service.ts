@@ -15,6 +15,19 @@ import { PowerShellExecutor } from './powershell-executor';
 
 export const DEFAULT_LIST_LIMIT = 50;
 export const MAX_LIST_LIMIT = 200;
+export const SUMMARY_WINDOW_HOURS = 24;
+
+/** GET /deployments/summary — contadores do painel de Monitoramento. */
+export interface DeploymentOverview {
+  /** Implantações ainda não encerradas. */
+  activeDeployments: number;
+  /** Máquinas instalando agora e máquinas na fila (de todas as implantações). */
+  runningTargets: number;
+  pendingTargets: number;
+  windowHours: number;
+  /** Implantações encerradas na janela, por status final. */
+  finishedInWindow: { succeeded: number; failed: number; cancelled: number };
+}
 
 export interface DeploymentLogView {
   timestamp: string;
@@ -169,6 +182,42 @@ export class DeploymentsService {
       include: { ...summaryInclude, targets: { select: { status: true } } },
     });
     return rows.map(toSummaryView);
+  }
+
+  /**
+   * Contadores do painel de Monitoramento (Bloco 5), sobre TODAS as implantações — não
+   * só as que aparecem na lista. "Agora": implantações não encerradas e máquinas em
+   * execução ou na fila. Encerradas: nas últimas 24 h, para o painel refletir o dia de
+   * trabalho em vez de crescer para sempre (o total histórico fica no Histórico).
+   */
+  async summary(now: Date = new Date()): Promise<DeploymentOverview> {
+    const since = new Date(now.getTime() - SUMMARY_WINDOW_HOURS * 3600 * 1000);
+    const [active, targetGroups, finishedGroups] = await Promise.all([
+      this.prisma.deployment.count({ where: { finishedAt: null } }),
+      this.prisma.deploymentTarget.groupBy({
+        by: ['status'],
+        where: { status: { in: [DeploymentStatus.PENDING, DeploymentStatus.RUNNING] } },
+        _count: { _all: true },
+      }),
+      this.prisma.deployment.groupBy({
+        by: ['status'],
+        where: { finishedAt: { gte: since } },
+        _count: { _all: true },
+      }),
+    ]);
+    const targets = (s: DeploymentStatus) => targetGroups.find((g) => g.status === s)?._count._all ?? 0;
+    const finished = (s: DeploymentStatus) => finishedGroups.find((g) => g.status === s)?._count._all ?? 0;
+    return {
+      activeDeployments: active,
+      runningTargets: targets(DeploymentStatus.RUNNING),
+      pendingTargets: targets(DeploymentStatus.PENDING),
+      windowHours: SUMMARY_WINDOW_HOURS,
+      finishedInWindow: {
+        succeeded: finished(DeploymentStatus.SUCCEEDED),
+        failed: finished(DeploymentStatus.FAILED),
+        cancelled: finished(DeploymentStatus.CANCELLED),
+      },
+    };
   }
 
   async get(id: string): Promise<DeploymentView> {

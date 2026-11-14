@@ -18,6 +18,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { validateDeploymentCreate } from './deployment-validation';
 import {
   DeploymentLogView,
+  DeploymentOverview,
   DeploymentSummaryView,
   DeploymentsService,
   DeploymentView,
@@ -37,6 +38,18 @@ export class DeploymentsController {
   @Get()
   list(@Query('limit') limit?: unknown): Promise<DeploymentSummaryView[]> {
     return this.deploymentsService.list(parseListLimit(limit));
+  }
+
+  /**
+   * Contadores do painel de Monitoramento. Leitura para qualquer usuário logado.
+   *
+   * PRECISA ficar declarada ANTES de @Get(':id'): o Express testa as rotas na ordem de
+   * declaração, e ':id' capturaria "summary" (o ParseUUIDPipe responderia 400) — mesma
+   * lição da rota installer-limits do catálogo.
+   */
+  @Get('summary')
+  summary(): Promise<DeploymentOverview> {
+    return this.deploymentsService.summary();
   }
 
   /** Leitura para qualquer usuário logado. A tela de acompanhamento consulta esta rota. */

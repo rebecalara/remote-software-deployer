@@ -8,7 +8,7 @@ export function LoginPage() {
   const { login, isAuthenticated, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/machines';
+  const from = (location.state as { from?: string } | null)?.from ?? '/monitoring';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

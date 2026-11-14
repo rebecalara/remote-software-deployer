@@ -56,3 +56,15 @@ export interface DeploymentCreateInput {
 
 /** Limite do backend (deployment-validation.ts: MAX_TARGETS_PER_DEPLOYMENT). */
 export const MAX_TARGETS_PER_DEPLOYMENT = 50;
+
+/** GET /deployments/summary — contadores do painel de Monitoramento. */
+export interface DeploymentOverview {
+  /** Implantações ainda não encerradas. */
+  activeDeployments: number;
+  /** Máquinas instalando agora e máquinas na fila (de todas as implantações). */
+  runningTargets: number;
+  pendingTargets: number;
+  windowHours: number;
+  /** Implantações encerradas nas últimas `windowHours` horas, por status final. */
+  finishedInWindow: { succeeded: number; failed: number; cancelled: number };
+}

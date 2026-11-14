@@ -1,5 +1,11 @@
 import { apiFetch } from './apiClient';
-import type { Deployment, DeploymentCreateInput, DeploymentLog, DeploymentSummary } from '../types/deployment';
+import type {
+  Deployment,
+  DeploymentCreateInput,
+  DeploymentLog,
+  DeploymentOverview,
+  DeploymentSummary,
+} from '../types/deployment';
 
 /**
  * Cria e enfileira (ADMIN/OPERATOR). Responde na hora, com as máquinas PENDING; a
@@ -29,4 +35,9 @@ export function getTargetLogs(deploymentId: string, targetId: string): Promise<D
 /** Cancela só as máquinas pendentes (ADMIN/OPERATOR); as em execução terminam normalmente. */
 export function cancelDeployment(id: string): Promise<Deployment> {
   return apiFetch<Deployment>(`/deployments/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+}
+
+/** Contadores do painel de Monitoramento, sobre todas as implantações. */
+export function getDeploymentOverview(): Promise<DeploymentOverview> {
+  return apiFetch<DeploymentOverview>('/deployments/summary');
 }
