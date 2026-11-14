@@ -25,7 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', title: 'Dashboard', icon: DashboardIcon, available: true },
   { label: 'Máquinas', path: '/machines', title: 'Gerenciamento de Máquinas', icon: MonitorIcon, available: true },
   { label: 'Catálogo de Software', path: '/software', title: 'Catálogo de Software', icon: PackageIcon, available: true },
-  { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: false, block: 'Bloco 4' },
+  { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true },
   { label: 'Monitoramento', path: '/monitoring', title: 'Monitoramento', icon: ActivityIcon, available: false, block: 'Bloco 5' },
   { label: 'Histórico', path: '/history', title: 'Histórico', icon: HistoryIcon, available: false, block: 'Bloco 6' },
 ];

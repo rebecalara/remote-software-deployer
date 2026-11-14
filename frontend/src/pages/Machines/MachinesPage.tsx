@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { RefreshIcon, SearchIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
@@ -6,6 +7,7 @@ import { SessionExpiredError } from '../../services/apiClient';
 import { getSyncStatus, listMachines, syncMachines } from '../../services/machineService';
 import type { Machine, MachineListResponse, SyncStatus } from '../../types/machine';
 import { formatRelative } from '../../utils/format';
+import type { NewDeploymentLocationState } from '../Deployments/NewDeploymentPage';
 import { MachineDetailsPanel } from './MachineDetailsPanel';
 import { MissingFromAdBadge, StatusBadge } from './MachineBadges';
 import { SyncStatusLine } from './SyncStatusLine';
@@ -27,6 +29,7 @@ export function MachinesPage() {
   const { user } = useAuth();
   const canSync = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
   const now = useNow();
+  const navigate = useNavigate();
 
   const [data, setData] = useState<MachineListResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -317,7 +320,7 @@ export function MachinesPage() {
           )}
         </div>
 
-        {/* Barra de seleção (RF03) — o botão vira funcional no Bloco 4 */}
+        {/* Barra de seleção (RF03) — "Implantar software" abre a Nova Instalação já com estas máquinas */}
         {selected.size > 0 && (
           <div className="sticky bottom-4 z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
             <p className="text-sm font-medium text-slate-900">
@@ -332,9 +335,12 @@ export function MachinesPage() {
             </button>
             <button
               type="button"
-              disabled
-              title="Disponível a partir do Bloco 4 (Implantação Remota)"
-              className="ml-auto cursor-not-allowed rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white opacity-50"
+              disabled={!canSync}
+              onClick={() =>
+                navigate('/deployments/new', { state: { machineIds: [...selected] } satisfies NewDeploymentLocationState })
+              }
+              title={canSync ? undefined : 'Somente Administradores e Operadores iniciam implantações'}
+              className="ml-auto rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Implantar software
             </button>

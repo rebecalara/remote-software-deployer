@@ -4,6 +4,7 @@ import { LoginPage } from '../pages/Login/LoginPage';
 import { DashboardPage } from '../pages/Dashboard/DashboardPage';
 import { MachinesPage } from '../pages/Machines/MachinesPage';
 import { SoftwarePage } from '../pages/Software/SoftwarePage';
+import { NewDeploymentPage } from '../pages/Deployments/NewDeploymentPage';
 import { ProtectedRoute } from './ProtectedRoute';
 
 export function AppRoutes() {
@@ -16,6 +17,7 @@ export function AppRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/machines" element={<MachinesPage />} />
           <Route path="/software" element={<SoftwarePage />} />
+          <Route path="/deployments/new" element={<NewDeploymentPage />} />
         </Route>
       </Route>
 

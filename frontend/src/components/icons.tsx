@@ -80,6 +80,27 @@ export function TrashIcon(props: IconProps) {
 export function PowerIcon(props: IconProps) {
   return <Svg {...props}><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></Svg>;
 }
+export function CheckCircleIcon(props: IconProps) {
+  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></Svg>;
+}
+export function CheckIcon(props: IconProps) {
+  return <Svg {...props}><path d="M5 12l5 5 9-10" /></Svg>;
+}
+export function PlayIcon(props: IconProps) {
+  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l6-3.5z" /></Svg>;
+}
+export function ChevronLeftIcon(props: IconProps) {
+  return <Svg {...props}><path d="M15 18l-6-6 6-6" /></Svg>;
+}
+export function ChevronRightIcon(props: IconProps) {
+  return <Svg {...props}><path d="M9 18l6-6-6-6" /></Svg>;
+}
+export function InfoIcon(props: IconProps) {
+  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></Svg>;
+}
+export function ShieldIcon(props: IconProps) {
+  return <Svg {...props}><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z" /></Svg>;
+}
 export function UploadIcon(props: IconProps) {
   return <Svg {...props}><path d="M12 16V4" /><path d="M7 9l5-5 5 5" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></Svg>;
 }
