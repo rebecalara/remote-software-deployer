@@ -1,5 +1,5 @@
 import { DeploymentStatus as S, LogLevel } from '@prisma/client';
-import { aggregateDeploymentStatus, interpretExitCode } from './deployment-outcome';
+import { aggregateDeploymentStatus, interpretExitCode, interpretResult } from './deployment-outcome';
 
 describe('interpretExitCode', () => {
   it.each(['MSI', 'EXE'] as const)('0 é sucesso (%s)', (type) => {
@@ -23,7 +23,11 @@ describe('interpretExitCode', () => {
   });
 
   it.each([
-    [1603, 'Erro fatal durante a instalação (código 1603).'],
+    [
+      1603,
+      'Erro fatal durante a instalação (código 1603). O produto pode já estar instalado na máquina ' +
+        'ou ter uma instalação anterior incompleta.',
+    ],
     [1618, 'Outra instalação estava em andamento na máquina (código 1618). Tente de novo mais tarde.'],
     [1638, 'Outra versão deste produto já está instalada na máquina (código 1638).'],
   ])('código %i do MSI tem mensagem própria', (code, message) => {
@@ -40,6 +44,32 @@ describe('interpretExitCode', () => {
 
   it.each([1, 2, -1, 5])('qualquer outro código é falha (%i)', (code) => {
     expect(interpretExitCode(code, 'MSI').status).toBe(S.FAILED);
+  });
+});
+
+describe('interpretResult', () => {
+  it('código de saída: segue a tabela e grava o código', () => {
+    expect(interpretResult({ ok: true, exitCode: 3010 }, 'MSI')).toMatchObject({
+      status: S.SUCCEEDED,
+      level: LogLevel.WARN,
+      exitCode: 3010,
+    });
+  });
+
+  it('MSI já instalado: sucesso com aviso "já instalado", sem código (nada rodou)', () => {
+    const code = '{23170F69-40C1-2702-2606-000001000000}';
+    expect(interpretResult({ ok: true, alreadyInstalled: true, productCode: code }, 'MSI')).toEqual({
+      status: S.SUCCEEDED,
+      level: LogLevel.WARN,
+      message: `Já instalado: o produto deste pacote (ProductCode ${code}) já está instalado na máquina. A instalação não foi executada.`,
+      exitCode: null,
+    });
+  });
+
+  it('falha: FAILED com a mensagem do executor, sem código', () => {
+    expect(
+      interpretResult({ ok: false, phase: 'connect', reason: 'unreachable', message: 'não respondeu' }, 'MSI'),
+    ).toEqual({ status: S.FAILED, level: LogLevel.ERROR, message: 'não respondeu', exitCode: null });
   });
 });
 

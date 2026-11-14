@@ -30,6 +30,7 @@ export type DeployPhase =
   | 'connect'
   | 'copy'
   | 'verify'
+  | 'check'
   | 'install'
   | 'cleanup'
   | 'executor';
@@ -73,11 +74,14 @@ export interface DeployEvent {
 }
 
 /**
- * `ok: true` = o instalador executou e terminou (qualquer código de saída).
+ * `ok: true` com `exitCode` = o instalador executou e terminou (qualquer código).
+ * `ok: true` com `alreadyInstalled` = MSI cujo ProductCode já estava instalado na
+ * máquina; nada foi executado.
  * `ok: false` = parou antes ou durante, por um motivo conhecido. Nunca lança.
  */
 export type DeployResult =
   | { ok: true; exitCode: number }
+  | { ok: true; alreadyInstalled: true; productCode: string }
   | { ok: false; phase: DeployPhase; reason: DeployFailureReason; message: string };
 
 export interface WinRmCredential {
@@ -323,7 +327,11 @@ function fail(phase: DeployPhase, reason: DeployFailureReason, message: string):
   return { ok: false, phase, reason, message };
 }
 
-const PHASES = new Set<DeployPhase>(['validate', 'resolve', 'connect', 'copy', 'verify', 'install', 'cleanup', 'executor']);
+const PHASES = new Set<DeployPhase>([
+  'validate', 'resolve', 'connect', 'copy', 'verify', 'check', 'install', 'cleanup', 'executor',
+]);
+/** ProductCode do Windows Installer: GUID entre chaves. */
+const PRODUCT_CODE = /^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$/;
 const LEVELS = new Set<string>(Object.values(LogLevel));
 
 type ParsedLine =
@@ -347,6 +355,10 @@ export function parseLine(line: string): ParsedLine | null {
   }
   if (e.type === 'result' && e.ok === true && Number.isInteger(e.exitCode)) {
     return { type: 'result', result: { ok: true, exitCode: e.exitCode as number } };
+  }
+  if (e.type === 'result' && e.ok === true && e.alreadyInstalled === true && typeof e.productCode === 'string' &&
+      PRODUCT_CODE.test(e.productCode)) {
+    return { type: 'result', result: { ok: true, alreadyInstalled: true, productCode: e.productCode.toUpperCase() } };
   }
   if (e.type === 'result' && e.ok === false && typeof e.message === 'string') {
     const reason = typeof e.reason === 'string' ? (e.reason as DeployFailureReason) : 'unexpected';

@@ -1,4 +1,5 @@
 import { DeploymentStatus, InstallType, LogLevel } from '@prisma/client';
+import type { DeployResult } from './powershell-executor';
 
 // Regras de resultado (DECISIONS.md, Bloco 4: "códigos de saída, reinício e
 // cancelamento"). Funções puras — o executor só devolve o número; aqui se decide o
@@ -8,6 +9,33 @@ export interface ExitCodeOutcome {
   status: typeof DeploymentStatus.SUCCEEDED | typeof DeploymentStatus.FAILED;
   level: LogLevel;
   message: string;
+}
+
+export interface TargetOutcome extends ExitCodeOutcome {
+  /** O que vai para DeploymentTarget.exitCode: null quando nada foi executado. */
+  exitCode: number | null;
+}
+
+/**
+ * Resultado do executor → status, log final e código gravado no alvo.
+ * (`'x' in result` em vez de `result.ok`: sem strictNullChecks — tsconfig com
+ * strict: false — o TypeScript não estreita a união pelo campo booleano.)
+ */
+export function interpretResult(result: DeployResult, installType: InstallType): TargetOutcome {
+  if ('exitCode' in result) {
+    return { ...interpretExitCode(result.exitCode, installType), exitCode: result.exitCode };
+  }
+  if ('alreadyInstalled' in result) {
+    return {
+      status: DeploymentStatus.SUCCEEDED,
+      level: LogLevel.WARN,
+      message:
+        `Já instalado: o produto deste pacote (ProductCode ${result.productCode}) já está instalado na ` +
+        'máquina. A instalação não foi executada.',
+      exitCode: null,
+    };
+  }
+  return { status: DeploymentStatus.FAILED, level: LogLevel.ERROR, message: result.message, exitCode: null };
 }
 
 /** Sucesso com reinício pendente ou iniciado: vale para MSI e EXE. */
@@ -24,7 +52,9 @@ const SUCCESS_WITH_REBOOT: Record<number, string> = {
  */
 const MSI_FAILURES: Record<number, string> = {
   1602: 'A instalação foi cancelada na máquina (código 1602).',
-  1603: 'Erro fatal durante a instalação (código 1603).',
+  1603:
+    'Erro fatal durante a instalação (código 1603). O produto pode já estar instalado na máquina ' +
+    'ou ter uma instalação anterior incompleta.',
   1618: 'Outra instalação estava em andamento na máquina (código 1618). Tente de novo mais tarde.',
   1619: 'O pacote de instalação não pôde ser aberto na máquina (código 1619).',
   1625: 'A instalação foi bloqueada por uma política da máquina (código 1625).',

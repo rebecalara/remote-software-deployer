@@ -117,3 +117,10 @@ dn: cn=WS-OBR-001,ou=Obras\, Viacao,ou=computers,dc=rsd,dc=local
 objectClass: device
 cn: WS-OBR-001
 description: Windows 10 Pro
+
+# VM de teste do Bloco 4 (Hyper-V, fora de domínio): a ÚNICA entrada que existe de
+# verdade. É o alvo das implantações no ambiente local — ver DECISIONS.md, Bloco 4.
+dn: cn=rsd-alvo-01,ou=TI,ou=computers,dc=rsd,dc=local
+objectClass: device
+cn: rsd-alvo-01
+description: Windows 11 Enterprise Evaluation

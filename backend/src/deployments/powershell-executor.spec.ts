@@ -69,6 +69,17 @@ describe('PowerShellExecutor (com processo falso)', () => {
     ]);
   });
 
+  it('repassa "já instalado" (MSI) com o ProductCode normalizado em maiúsculas', async () => {
+    const { result } = await runWith(executor, input('FAKE-ALREADY'));
+    expect(result).toEqual({ ok: true, alreadyInstalled: true, productCode: '{23170F69-40C1-2702-2606-000001000000}' });
+  });
+
+  it('"já instalado" com ProductCode fora do formato GUID não é aceito como resultado', async () => {
+    const { result, events } = await runWith(executor, input('FAKE-ALREADY-BAD-CODE'));
+    expect(result).toMatchObject({ ok: false, reason: 'no-result' });
+    expect(events[0]).toMatchObject({ level: LogLevel.DEBUG, phase: 'executor' });
+  });
+
   it('repassa a falha relatada pelo script, com fase e motivo', async () => {
     const { result } = await runWith(executor, input('FAKE-FAIL-CONNECT'));
     expect(result).toEqual({ ok: false, phase: 'connect', reason: 'unreachable', message: 'não respondeu' });
@@ -254,6 +265,24 @@ describe('funções auxiliares', () => {
 
 describe('deploy-target.ps1', () => {
   const source = readFileSync(DEPLOY_SCRIPT_PATH);
+
+  it('no MSI, REBOOT=ReallySuppress vem DEPOIS dos argumentos do catálogo (o último vence)', () => {
+    // Achado no teste com a VM: REBOOT=Force depois do /norestart reiniciou a máquina.
+    expect(source.toString('utf8')).toMatch(
+      /\$argList = @\('\/i', \$File, '\/qn', '\/norestart'\) \+ \$extra \+ @\('REBOOT=ReallySuppress'\)/,
+    );
+  });
+
+  it('no MSI, confere se o produto já está instalado ANTES de executar o instalador', () => {
+    const text = source.toString('utf8');
+    const check = text.indexOf("'ProductState'");
+    const install = text.indexOf('Start-Process @startParams');
+    expect(check).toBeGreaterThan(0);
+    expect(install).toBeGreaterThan(check);
+    // E só segue para a instalação se não houver resultado ainda ("já instalado").
+    expect(text.indexOf('if ($null -eq $final) {')).toBeGreaterThan(check);
+    expect(text.indexOf('if ($null -eq $final) {')).toBeLessThan(install);
+  });
 
   it('está salvo em UTF-8 com BOM (sem ele, o PowerShell 5.1 corrompe os acentos)', () => {
     expect([...source.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);

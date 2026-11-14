@@ -13,9 +13,11 @@
   Saida: UM evento JSON por linha no stdout, so com caracteres ASCII:
     {"type":"log","level":"INFO","phase":"copy","message":"..."}
     {"type":"result","ok":true,"exitCode":3010}
+    {"type":"result","ok":true,"alreadyInstalled":true,"productCode":"{...}"}
     {"type":"result","ok":false,"phase":"connect","reason":"unreachable","message":"..."}
   O script NAO interpreta o codigo de saida (0, 3010, 1603...): isso e regra do
-  backend. "ok" so diz que o instalador chegou a executar e terminar.
+  backend. "ok" diz que o instalador executou e terminou, ou que (so MSI) o produto
+  ja estava instalado e nada foi executado.
 
   Este arquivo precisa ser salvo em UTF-8 COM BOM: sem o BOM, o Windows PowerShell
   5.1 le o arquivo como ANSI e as mensagens com acento saem corrompidas (um teste
@@ -210,7 +212,8 @@ try {
       "Não foi possível acessar \\$computer\C$ (compartilhamento administrativo, porta 445): $(Get-InnermostMessage $_)")
   }
   $remoteDir = "RSDTARGET:$($remoteDirLocal.Substring(2))"        # C:\Windows\... -> RSDTARGET:\Windows\...
-  $sizeMb = [math]::Round((Get-Item -LiteralPath $in.installerPath).Length / 1MB, 1)
+  # "1,9 MB" (vírgula decimal): a mensagem vai para a tela em português.
+  $sizeMb = ((Get-Item -LiteralPath $in.installerPath).Length / 1MB).ToString('0.0', [Globalization.CultureInfo]'pt-BR')
   Write-Log 'INFO' 'copy' "Copiando o instalador ($sizeMb MB) para $remoteFileLocal."
   try {
     $null = New-Item -ItemType Directory -Path $remoteDir -Force
@@ -232,44 +235,94 @@ try {
   }
   Write-Log 'INFO' 'verify' 'SHA-256 conferido na máquina de destino.'
 
+  # --- MSI: o produto já está instalado? -------------------------------------------
+  # Reinstalar um MSI já presente faz o Windows Installer RECONFIGURAR o produto, e
+  # ele procura a origem da instalação anterior — a pasta temporária que este script
+  # apaga no fim. Resultado: 1603 (encontrado no teste com a VM). Por isso, antes de
+  # executar, o ProductCode é lido do próprio pacote (tabela Property, só leitura) e
+  # conferido no Windows Installer da máquina. EXE não tem código de produto confiável:
+  # segue direto para a instalação.
+  if ($in.installType -eq 'MSI') {
+    $phase = 'check'
+    $check = Invoke-Command -Session $session -ArgumentList $remoteFileLocal -ScriptBlock {
+      param($Path)
+      $wi = $null; $db = $null; $view = $null; $rec = $null
+      try {
+        $wi = New-Object -ComObject WindowsInstaller.Installer
+        $db = $wi.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $wi, @($Path, 0))
+        $view = $db.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $db,
+          @("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductCode'"))
+        [void] $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+        $rec = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if ($null -eq $rec) { return @{ productCode = $null; error = 'o pacote não tem ProductCode' } }
+        $code = [string] $rec.GetType().InvokeMember('StringData', 'GetProperty', $null, $rec, 1)
+        [void] $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null)
+        # ProductState: 5 = instalado; -1 = desconhecido; 1 = anunciado; 2 = ausente.
+        $state = [int] $wi.GetType().InvokeMember('ProductState', 'GetProperty', $null, $wi, @($code))
+        return @{ productCode = $code; state = $state; error = $null }
+      } catch {
+        return @{ productCode = $null; error = $_.Exception.Message }
+      } finally {
+        # Solta o arquivo: sem isto, o pacote fica travado e a limpeza falha.
+        foreach ($o in $rec, $view, $db, $wi) {
+          if ($null -ne $o) { [void] [System.Runtime.InteropServices.Marshal]::ReleaseComObject($o) }
+        }
+      }
+    }
+    if ($check.error) {
+      Write-Log 'WARN' 'check' "Não foi possível conferir se o produto já está instalado ($($check.error)). A instalação segue."
+    } elseif ($check.state -eq 5) {
+      $final = @{ type = 'result'; ok = $true; alreadyInstalled = $true; productCode = [string] $check.productCode }
+    } else {
+      Write-Log 'INFO' 'check' "Produto ainda não instalado na máquina (ProductCode $($check.productCode))."
+    }
+  }
+
   # --- Instalação ---------------------------------------------------------------
   # Os argumentos seguem SEMPRE como itens do -ArgumentList do Start-Process — nunca
   # Invoke-Expression, cmd /c ou comando montado como texto (DECISIONS.md, Bloco 4).
-  $phase = 'install'
-  Write-Log 'INFO' 'install' "Executando o instalador ($($in.installType)) em $computer."
-  $outcome = Invoke-Command -Session $session -ArgumentList $remoteFileLocal, $in.installType, $installArgs, $installMs -ScriptBlock {
-    param($File, $Type, $ExtraArgs, $TimeoutMs)
-    $ErrorActionPreference = 'Stop'
-    $extra = @(@($ExtraArgs) | Where-Object { $null -ne $_ })
-    if ($Type -eq 'MSI') {
-      $exe = Join-Path $env:SystemRoot 'System32\msiexec.exe'
-      $argList = @('/i', $File, '/qn', '/norestart') + $extra
-    } else {
-      $exe = $File
-      $argList = $extra
+  if ($null -eq $final) {
+    $phase = 'install'
+    Write-Log 'INFO' 'install' "Executando o instalador ($($in.installType)) em $computer."
+    $outcome = Invoke-Command -Session $session -ArgumentList $remoteFileLocal, $in.installType, $installArgs, $installMs -ScriptBlock {
+      param($File, $Type, $ExtraArgs, $TimeoutMs)
+      $ErrorActionPreference = 'Stop'
+      $extra = @(@($ExtraArgs) | Where-Object { $null -ne $_ })
+      if ($Type -eq 'MSI') {
+        $exe = Join-Path $env:SystemRoot 'System32\msiexec.exe'
+        # REBOOT=ReallySuppress por ÚLTIMO: uma propriedade REBOOT vinda do catálogo
+        # depois do /norestart vence (no teste com a VM, REBOOT=Force deu 1641 e a
+        # máquina reiniciou). A última ocorrência na linha de comando prevalece, então
+        # esta garante que o sistema nunca reinicia a máquina, mesmo que o validador do
+        # catálogo seja contornado.
+        $argList = @('/i', $File, '/qn', '/norestart') + $extra + @('REBOOT=ReallySuppress')
+      } else {
+        $exe = $File
+        $argList = $extra
+      }
+      $startParams = @{ FilePath = $exe; PassThru = $true }
+      if ($argList.Count -gt 0) { $startParams.ArgumentList = $argList }
+      $process = Start-Process @startParams
+      # Sem ler o Handle logo após o início, o ExitCode pode vir vazio
+      # (comportamento conhecido do Start-Process -PassThru).
+      $null = $process.Handle
+      if ($process.WaitForExit($TimeoutMs)) {
+        return @{ timedOut = $false; exitCode = $process.ExitCode }
+      }
+      # Instalador travado (pelo WinRM não há janela: um EXE sem o argumento silencioso
+      # espera para sempre). Encerra a árvore inteira de processos.
+      $null = & taskkill.exe /PID $process.Id /T /F 2>&1
+      return @{ timedOut = $true; exitCode = $null }
     }
-    $startParams = @{ FilePath = $exe; PassThru = $true }
-    if ($argList.Count -gt 0) { $startParams.ArgumentList = $argList }
-    $process = Start-Process @startParams
-    # Sem ler o Handle logo após o início, o ExitCode pode vir vazio
-    # (comportamento conhecido do Start-Process -PassThru).
-    $null = $process.Handle
-    if ($process.WaitForExit($TimeoutMs)) {
-      return @{ timedOut = $false; exitCode = $process.ExitCode }
-    }
-    # Instalador travado (pelo WinRM não há janela: um EXE sem o argumento silencioso
-    # espera para sempre). Encerra a árvore inteira de processos.
-    $null = & taskkill.exe /PID $process.Id /T /F 2>&1
-    return @{ timedOut = $true; exitCode = $null }
-  }
 
-  if ($outcome.timedOut) {
-    throw [DeployFailure]::new('install', 'install-timeout',
-      "Tempo esgotado ($($in.installTimeoutSeconds) s): o instalador foi encerrado. Ele pode estar esperando interação — confira os argumentos de instalação silenciosa.")
+    if ($outcome.timedOut) {
+      throw [DeployFailure]::new('install', 'install-timeout',
+        "Tempo esgotado ($($in.installTimeoutSeconds) s): o instalador foi encerrado. Ele pode estar esperando interação — confira os argumentos de instalação silenciosa.")
+    }
+    $exitCode = [int] $outcome.exitCode
+    Write-Log 'INFO' 'install' "O instalador terminou com o código $exitCode."
+    $final = @{ type = 'result'; ok = $true; exitCode = $exitCode }
   }
-  $exitCode = [int] $outcome.exitCode
-  Write-Log 'INFO' 'install' "O instalador terminou com o código $exitCode."
-  $final = @{ type = 'result'; ok = $true; exitCode = $exitCode }
 } catch [DeployFailure] {
   $final = @{ type = 'result'; ok = $false; phase = $_.Exception.Phase; reason = $_.Exception.Reason; message = $_.Exception.Message }
 } catch {

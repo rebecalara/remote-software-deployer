@@ -110,6 +110,16 @@ describe('DeploymentRunner', () => {
     expect(lastLog('t1')).toMatchObject({ level: LogLevel.ERROR, message: 'WS-001 não respondeu.' });
   });
 
+  it('MSI já instalado: SUCCEEDED, sem código de saída, com o aviso "já instalado"', async () => {
+    const { db, run, runner, lastLog } = setup();
+    run.mockResolvedValue({ ok: true, alreadyInstalled: true, productCode: '{23170F69-40C1-2702-2606-000001000000}' });
+    await runner.runTarget({ targetId: 't1', machineId: 'm1' });
+
+    expect(db.targets.get('t1')).toMatchObject({ status: S.SUCCEEDED, exitCode: null });
+    expect(lastLog('t1').level).toBe(LogLevel.WARN);
+    expect(lastLog('t1').message).toMatch(/^Já instalado: .* A instalação não foi executada\.$/);
+  });
+
   it('código de falha do instalador: FAILED com o código gravado', async () => {
     const { db, run, runner } = setup();
     run.mockResolvedValue({ ok: true, exitCode: 1603 });

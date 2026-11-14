@@ -117,8 +117,30 @@ export function validateInstallArgs(value: unknown, installType: InstallType): s
           '(o comando-base msiexec /i … /qn /norestart é fixo).',
       );
     }
+    if (installType === 'MSI' && !isAllowedRebootProperty(token)) {
+      throw new SoftwareValidationError(
+        field,
+        `"${token}": o sistema nunca reinicia a máquina. Em MSI, REBOOT só é aceito como ` +
+          'REBOOT=ReallySuppress, e REBOOTPROMPT não é aceito.',
+      );
+    }
   });
   return args;
+}
+
+/**
+ * Propriedades de reinício do Windows Installer. Encontrado no teste com a VM (Bloco
+ * 4, etapa 0): `REBOOT=Force` vindo DEPOIS do `/norestart` vence, o msiexec devolve
+ * 1641 e a máquina reinicia. O Windows Installer só olha a primeira letra do valor de
+ * REBOOT (F, S ou R), por isso só o valor exato ReallySuppress é aceito. A segunda
+ * camada está no deploy-target.ps1, que acrescenta REBOOT=ReallySuppress por último.
+ */
+function isAllowedRebootProperty(token: string): boolean {
+  const [name, ...rest] = token.split('=');
+  const value = rest.join('=');
+  if (/^REBOOTPROMPT$/i.test(name)) return false;
+  if (/^REBOOT$/i.test(name)) return /^ReallySuppress$/i.test(value);
+  return true;
 }
 
 /** Forma da lista (array de strings, limites), sem olhar o tipo de instalador. */

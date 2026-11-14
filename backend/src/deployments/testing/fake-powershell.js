@@ -29,6 +29,13 @@ process.stdin.on('end', () => {
       out({ type: 'result', ok: true, exitCode: 0 });
       return;
     }
+    case 'FAKE-ALREADY':
+      log('SHA-256 conferido.', 'INFO', 'verify');
+      out({ type: 'result', ok: true, alreadyInstalled: true, productCode: '{23170f69-40c1-2702-2606-000001000000}' });
+      return;
+    case 'FAKE-ALREADY-BAD-CODE':
+      out({ type: 'result', ok: true, alreadyInstalled: true, productCode: 'qualquer coisa' });
+      return;
     case 'FAKE-FAIL-CONNECT':
       log('Conectando.');
       out({ type: 'result', ok: false, phase: 'connect', reason: 'unreachable', message: 'não respondeu' });

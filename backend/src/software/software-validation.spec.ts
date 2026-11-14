@@ -163,6 +163,30 @@ describe('validateInstallArgs', () => {
       expect(field).toBe('installArgs[0]');
       expect(message).toContain('NOME=valor');
     });
+
+    // Achado no teste com a VM: REBOOT=Force depois do /norestart reiniciou a máquina.
+    it.each([
+      'REBOOT=Force',
+      'REBOOT=force',
+      'reboot=Force',
+      'REBOOT=Suppress',
+      'REBOOT=Rabbit', // o Windows Installer só olha a 1ª letra: R = ReallySuppress, mas não é aceito
+      'REBOOT=',
+      'REBOOT="ReallySuppress"',
+      'REBOOTPROMPT=S',
+      'REBOOTPROMPT=""',
+    ])('recusa propriedade de reinício %p', (token) => {
+      const { field, message } = errorOf(() => validateInstallArgs(['ALLUSERS=1', token], 'MSI'));
+      expect(field).toBe('installArgs[1]');
+      expect(message).toContain('o sistema nunca reinicia a máquina');
+    });
+
+    it.each(['REBOOT=ReallySuppress', 'REBOOT=reallysuppress', 'REBOOTX=1', 'MYREBOOT=Force'])(
+      'aceita %p (só suprime reinício, ou é outra propriedade)',
+      (token) => {
+        expect(validateInstallArgs([token], 'MSI')).toEqual([token]);
+      },
+    );
   });
 
   describe('recusa caracteres que não têm motivo legítimo num argumento', () => {

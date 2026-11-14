@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { DeploymentStatus, LogLevel } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
-import { aggregateDeploymentStatus, interpretExitCode } from './deployment-outcome';
+import { aggregateDeploymentStatus, interpretResult } from './deployment-outcome';
 import { DeployResult, PowerShellExecutor } from './powershell-executor';
 import { QueueItem, TargetQueue, parseMaxParallel } from './target-queue';
 
@@ -134,19 +134,13 @@ export class DeploymentRunner implements OnApplicationBootstrap {
         );
       }
 
-      // `'exitCode' in result` em vez de `result.ok`: sem strictNullChecks (tsconfig com
-      // strict: false), o TypeScript não estreita a união pelo campo booleano.
-      const exitCode = 'exitCode' in result ? result.exitCode : null;
-      const outcome =
-        'exitCode' in result
-          ? interpretExitCode(result.exitCode, software.installType)
-          : { status: DeploymentStatus.FAILED, level: LogLevel.ERROR, message: result.message };
+      const outcome = interpretResult(result, software.installType);
       log.write(outcome.level, outcome.message);
       await log.flush();
 
       await this.prisma.deploymentTarget.update({
         where: { id: targetId },
-        data: { status: outcome.status, finishedAt: new Date(), exitCode },
+        data: { status: outcome.status, finishedAt: new Date(), exitCode: outcome.exitCode },
       });
     } catch (err) {
       this.logger.error(`Falha inesperada ao executar o alvo ${targetId}: ${(err as Error).message}`);
