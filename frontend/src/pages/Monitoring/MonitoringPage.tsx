@@ -28,13 +28,15 @@ export function MonitoringPage() {
 
   const [overview, setOverview] = useState<DeploymentOverview | null>(null);
   const [recent, setRecent] = useState<DeploymentSummary[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [o, list] = await Promise.all([getDeploymentOverview(), listDeployments(RECENT)]);
+      const [o, page] = await Promise.all([getDeploymentOverview(), listDeployments({ pageSize: RECENT })]);
       setOverview(o);
-      setRecent(list);
+      setRecent(page.items);
+      setTotal(page.total);
       setError(null);
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setError(messageOf(err));
@@ -159,9 +161,12 @@ export function MonitoringPage() {
           </div>
         )}
       </div>
-      {recent !== null && recent.length === RECENT && (
+      {recent !== null && total > recent.length && (
         <p className="text-xs text-slate-500">
-          Mostrando as {RECENT} mais recentes.
+          Mostrando as {recent.length} mais recentes de {total}.{' '}
+          <Link to="/history" className="font-medium text-blue-700 hover:underline">
+            Ver o histórico completo
+          </Link>
         </p>
       )}
     </div>

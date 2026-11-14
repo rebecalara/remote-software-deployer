@@ -2,9 +2,10 @@ import { apiFetch } from './apiClient';
 import type {
   Deployment,
   DeploymentCreateInput,
+  DeploymentListFilters,
   DeploymentLog,
   DeploymentOverview,
-  DeploymentSummary,
+  DeploymentPage,
 } from '../types/deployment';
 
 /**
@@ -16,9 +17,14 @@ export function createDeployment(input: DeploymentCreateInput): Promise<Deployme
   return apiFetch<Deployment>('/deployments', { method: 'POST', body: input });
 }
 
-/** Mais recentes primeiro, com a contagem por status. */
-export function listDeployments(limit?: number): Promise<DeploymentSummary[]> {
-  return apiFetch<DeploymentSummary[]>(`/deployments${limit ? `?limit=${limit}` : ''}`);
+/** Mais recentes primeiro, paginada e com filtros (Histórico). 400 com o campo se um filtro for inválido. */
+export function listDeployments(filters: DeploymentListFilters = {}): Promise<DeploymentPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') params.set(key, String(value));
+  }
+  const query = params.toString();
+  return apiFetch<DeploymentPage>(`/deployments${query ? `?${query}` : ''}`);
 }
 
 export function getDeployment(id: string): Promise<Deployment> {

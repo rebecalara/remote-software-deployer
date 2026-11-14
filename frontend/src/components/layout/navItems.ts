@@ -25,7 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Catálogo de Software', path: '/software', title: 'Catálogo de Software', icon: PackageIcon, available: true },
   { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true },
   { label: 'Monitoramento', path: '/monitoring', title: 'Monitoramento', icon: ActivityIcon, available: true },
-  { label: 'Histórico', path: '/history', title: 'Histórico', icon: HistoryIcon, available: false, block: 'Bloco 6' },
+  { label: 'Histórico', path: '/history', title: 'Histórico', icon: HistoryIcon, available: true },
 ];
 
 export function titleForPath(pathname: string): string {

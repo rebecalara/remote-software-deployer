@@ -10,11 +10,9 @@ import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { DeploymentRunner } from './deployment-runner';
-import { DeploymentCreateInput } from './deployment-validation';
+import { DeploymentCreateInput, DeploymentListQuery } from './deployment-validation';
 import { PowerShellExecutor } from './powershell-executor';
 
-export const DEFAULT_LIST_LIMIT = 50;
-export const MAX_LIST_LIMIT = 200;
 export const SUMMARY_WINDOW_HOURS = 24;
 
 /** GET /deployments/summary — contadores do painel de Monitoramento. */
@@ -71,6 +69,14 @@ interface DeploymentBase {
 
 /** Item da lista: sem as máquinas, só a contagem por status. */
 export type DeploymentSummaryView = DeploymentBase;
+
+/** GET /deployments — uma página da lista, com o total para a paginação. */
+export interface DeploymentPage {
+  items: DeploymentSummaryView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
 export interface DeploymentView extends DeploymentBase {
   targets: DeploymentTargetView[];
@@ -174,14 +180,24 @@ export class DeploymentsService {
     return toDeploymentView(created);
   }
 
-  /** Mais recentes primeiro. Filtros e paginação ficam para o Histórico (Bloco 6). */
-  async list(limit: number = DEFAULT_LIST_LIMIT): Promise<DeploymentSummaryView[]> {
-    const rows = await this.prisma.deployment.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      include: { ...summaryInclude, targets: { select: { status: true } } },
-    });
-    return rows.map(toSummaryView);
+  /**
+   * Mais recentes primeiro, com filtros (Histórico, Bloco 6): período de criação,
+   * status, software e parte do nome de uma das máquinas. O total vem na mesma
+   * transação de leitura da página.
+   */
+  async list(query: DeploymentListQuery): Promise<DeploymentPage> {
+    const where = deploymentListWhere(query);
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.deployment.count({ where }),
+      this.prisma.deployment.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        include: { ...summaryInclude, targets: { select: { status: true } } },
+      }),
+    ]);
+    return { items: rows.map(toSummaryView), total, page: query.page, pageSize: query.pageSize };
   }
 
   /**
@@ -337,9 +353,16 @@ export function toDeploymentView(d: DeploymentWithRelations): DeploymentView {
   };
 }
 
-/** ?limit= da lista: inteiro de 1 a 200; qualquer outra coisa usa o padrão. */
-export function parseListLimit(raw: unknown): number {
-  const value = typeof raw === 'string' ? Number(raw) : NaN;
-  if (!Number.isInteger(value) || value < 1) return DEFAULT_LIST_LIMIT;
-  return Math.min(value, MAX_LIST_LIMIT);
+/** Filtros da lista → WHERE do Prisma (exportado para teste). */
+export function deploymentListWhere(query: DeploymentListQuery): Prisma.DeploymentWhereInput {
+  const where: Prisma.DeploymentWhereInput = {};
+  if (query.status) where.status = query.status;
+  if (query.softwareId) where.softwareId = query.softwareId;
+  if (query.from || query.to) {
+    where.createdAt = { ...(query.from ? { gte: query.from } : {}), ...(query.to ? { lt: query.to } : {}) };
+  }
+  if (query.machine) {
+    where.targets = { some: { machine: { hostname: { contains: query.machine, mode: 'insensitive' } } } };
+  }
+  return where;
 }

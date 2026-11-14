@@ -3,7 +3,8 @@ import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
 import { ROLES_KEY } from '../auth/roles.decorator';
 import { DeploymentsController } from './deployments.controller';
-import { DeploymentsService, parseListLimit } from './deployments.service';
+import { parseDeploymentListQuery } from './deployment-validation';
+import { DeploymentsService, deploymentListWhere } from './deployments.service';
 
 // Etapa D: consulta, logs por máquina e cancelamento das máquinas pendentes.
 
@@ -33,26 +34,32 @@ function depRow(targets: Array<Record<string, unknown>>, overrides: Record<strin
 
 function setup() {
   const prisma = {
-    deployment: { findMany: jest.fn(), findUnique: jest.fn() },
+    deployment: { findMany: jest.fn(), findUnique: jest.fn(), count: jest.fn() },
     deploymentTarget: { findFirst: jest.fn(), updateMany: jest.fn() },
     deploymentLog: { findMany: jest.fn(), createMany: jest.fn() },
   };
   const runner = { enqueue: jest.fn(), finalizeDeployment: jest.fn() };
-  const service = new DeploymentsService(prisma as never, {} as never, {} as never, runner as never);
-  return { prisma, runner, service };
+  // $transaction com lista de consultas: resolve todas, na ordem.
+  const tx = { $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)) };
+  const service = new DeploymentsService({ ...prisma, ...tx } as never, {} as never, {} as never, runner as never);
+  return { prisma, runner, service, tx };
 }
 
 describe('DeploymentsService.list e get', () => {
-  it('lista as mais recentes com a contagem por status, sem as máquinas', async () => {
+  it('lista uma página das mais recentes com o total e a contagem por status, sem as máquinas', async () => {
     const { prisma, service } = setup();
+    prisma.deployment.count.mockResolvedValue(57);
     prisma.deployment.findMany.mockResolvedValue([
       depRow([{ status: 'SUCCEEDED' }, { status: 'RUNNING' }, { status: 'PENDING' }, { status: 'FAILED' }]),
     ]);
-    const [item] = await service.list(10);
+    const page = await service.list(parseDeploymentListQuery({ page: '3', pageSize: '10' }));
+    const [item] = page.items;
 
+    expect(page).toMatchObject({ total: 57, page: 3, pageSize: 10 });
     expect(prisma.deployment.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { createdAt: 'desc' }, take: 10 }),
+      expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: 20, take: 10, where: {} }),
     );
+    expect(prisma.deployment.count).toHaveBeenCalledWith({ where: {} });
     expect(item.counts).toEqual({ total: 4, pending: 1, running: 1, succeeded: 1, failed: 1, cancelled: 0 });
     expect(item).not.toHaveProperty('targets');
     expect(item).toMatchObject({ id: DEP, startedAt: at(1).toISOString(), finishedAt: null });
@@ -197,16 +204,32 @@ describe('DeploymentsController — permissões', () => {
   });
 });
 
-describe('parseListLimit', () => {
-  it.each([
-    [undefined, 50],
-    ['10', 10],
-    ['0', 50],
-    ['abc', 50],
-    ['2.5', 50],
-    ['999', 200],
-    [['5', '6'], 50],
-  ])('%p → %p', (raw, expected) => {
-    expect(parseListLimit(raw)).toBe(expected);
+describe('deploymentListWhere (filtros do Histórico)', () => {
+  it('sem filtro, sem condição', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({}))).toEqual({});
+  });
+
+  it('combina período, status, software e máquina', () => {
+    const where = deploymentListWhere(
+      parseDeploymentListQuery({
+        from: '2026-11-01T03:00:00.000Z',
+        to: '2026-11-15T03:00:00.000Z',
+        status: 'FAILED',
+        softwareId: SW_ID,
+        machine: ' ws-adm ',
+      }),
+    );
+    expect(where).toEqual({
+      status: 'FAILED',
+      softwareId: SW_ID,
+      createdAt: { gte: new Date('2026-11-01T03:00:00.000Z'), lt: new Date('2026-11-15T03:00:00.000Z') },
+      targets: { some: { machine: { hostname: { contains: 'ws-adm', mode: 'insensitive' } } } },
+    });
+  });
+
+  it('só uma das datas', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({ from: '2026-11-01T03:00:00Z' }))).toEqual({
+      createdAt: { gte: new Date('2026-11-01T03:00:00Z') },
+    });
   });
 });

@@ -15,14 +15,13 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
-import { validateDeploymentCreate } from './deployment-validation';
+import { parseDeploymentListQuery, validateDeploymentCreate } from './deployment-validation';
 import {
   DeploymentLogView,
   DeploymentOverview,
-  DeploymentSummaryView,
+  DeploymentPage,
   DeploymentsService,
   DeploymentView,
-  parseListLimit,
 } from './deployments.service';
 
 /** Quem pode implantar e cancelar: mesma regra da escrita no catálogo (ADMIN e OPERATOR). */
@@ -34,10 +33,14 @@ export const DEPLOYMENT_WRITE_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.OPER
 export class DeploymentsController {
   constructor(private readonly deploymentsService: DeploymentsService) {}
 
-  /** Leitura para qualquer usuário logado. Mais recentes primeiro (?limit=, padrão 50, máx. 200). */
+  /**
+   * Leitura para qualquer usuário logado. Mais recentes primeiro, paginada
+   * (?page=, ?pageSize= até 100) e com filtros (?status=, ?softwareId=, ?machine=,
+   * ?from= e ?to= em ISO 8601). Filtro inválido = 400 com o campo.
+   */
   @Get()
-  list(@Query('limit') limit?: unknown): Promise<DeploymentSummaryView[]> {
-    return this.deploymentsService.list(parseListLimit(limit));
+  list(@Query() query: Record<string, unknown>): Promise<DeploymentPage> {
+    return this.deploymentsService.list(parseDeploymentListQuery(query));
   }
 
   /**

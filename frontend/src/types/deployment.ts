@@ -68,3 +68,22 @@ export interface DeploymentOverview {
   /** Implantações encerradas nas últimas `windowHours` horas, por status final. */
   finishedInWindow: { succeeded: number; failed: number; cancelled: number };
 }
+
+/** GET /deployments — uma página da lista, com o total para a paginação. */
+export interface DeploymentPage {
+  items: DeploymentSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Filtros do Histórico. Datas como instante ISO 8601 (o dia já convertido no fuso local). */
+export interface DeploymentListFilters {
+  page?: number;
+  pageSize?: number;
+  status?: DeploymentStatus;
+  softwareId?: string;
+  machine?: string;
+  from?: string;
+  to?: string;
+}
