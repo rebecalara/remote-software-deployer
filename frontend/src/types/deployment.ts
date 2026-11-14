@@ -87,3 +87,35 @@ export interface DeploymentListFilters {
   from?: string;
   to?: string;
 }
+
+/** GET /dashboard — resumo da tela inicial (espelha backend/src/dashboard/dashboard.service.ts). */
+export interface DashboardActivity {
+  kind: 'deployment' | 'software';
+  at: string;
+  by: string | null;
+  deploymentId?: string;
+  status?: DeploymentStatus;
+  succeeded?: number;
+  failed?: number;
+  total?: number;
+  softwareName: string;
+  softwareVersion: string;
+}
+
+export interface SystemCheck {
+  ok: boolean;
+  detail: string | null;
+}
+
+export interface DashboardData {
+  machines: { total: number; seenInLastSync: number; lastSyncAt: string | null };
+  deployments: DeploymentOverview & { failureRate: number | null };
+  activity: DashboardActivity[];
+  system: {
+    database: SystemCheck;
+    ldap: SystemCheck;
+    deployment: { available: boolean; detail: string | null };
+    lastSyncAt: string | null;
+    checkedAt: string;
+  };
+}

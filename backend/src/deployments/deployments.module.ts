@@ -21,5 +21,7 @@ import { PowerShellExecutor, loadPowerShellExecutorConfig } from './powershell-e
         new PowerShellExecutor(loadPowerShellExecutorConfig(process.env, new Logger(PowerShellExecutor.name))),
     },
   ],
+  // O Dashboard lê o resumo das implantações e se a implantação está disponível.
+  exports: [DeploymentsService, PowerShellExecutor],
 })
 export class DeploymentsModule {}

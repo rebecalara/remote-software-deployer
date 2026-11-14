@@ -65,6 +65,20 @@ export class LdapService {
     }
   }
 
+  /**
+   * O AD/LDAP responde? Faz só o bind da conta de serviço de leitura e desconecta — sem
+   * busca. Usado pelo "Status do sistema" do Dashboard. Lança LdapConnectionError ou
+   * LdapAuthenticationError, como o bind de login.
+   */
+  async checkServiceAccount(): Promise<void> {
+    const client = this.createClient();
+    try {
+      await this.bindClient(client, requireEnv('LDAP_SEARCH_BIND_DN'), requireEnv('LDAP_SEARCH_BIND_PASSWORD'));
+    } finally {
+      client.unbind();
+    }
+  }
+
   private createClient(): ldap.Client {
     const url = process.env.LDAP_URL;
     if (!url) {

@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import {
   ActivityIcon,
+  DashboardIcon,
   HistoryIcon,
   MonitorIcon,
   PackageIcon,
@@ -21,6 +22,7 @@ export interface NavItem {
 
 // Lista única do menu: cada bloco novo só muda `available` aqui.
 export const NAV_ITEMS: NavItem[] = [
+  { label: 'Dashboard', path: '/dashboard', title: 'Dashboard', icon: DashboardIcon, available: true },
   { label: 'Máquinas', path: '/machines', title: 'Gerenciamento de Máquinas', icon: MonitorIcon, available: true },
   { label: 'Catálogo de Software', path: '/software', title: 'Catálogo de Software', icon: PackageIcon, available: true },
   { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true },

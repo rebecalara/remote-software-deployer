@@ -6,6 +6,7 @@ import { SoftwarePage } from '../pages/Software/SoftwarePage';
 import { NewDeploymentPage } from '../pages/Deployments/NewDeploymentPage';
 import { DeploymentDetailsPage } from '../pages/Deployments/DeploymentDetailsPage';
 import { MonitoringPage } from '../pages/Monitoring/MonitoringPage';
+import { DashboardPage } from '../pages/Dashboard/DashboardPage';
 import { HistoryPage } from '../pages/History/HistoryPage';
 import { ProtectedRoute } from './ProtectedRoute';
 
@@ -16,6 +17,7 @@ export function AppRoutes() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/machines" element={<MachinesPage />} />
@@ -25,7 +27,7 @@ export function AppRoutes() {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/monitoring" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }

@@ -1,5 +1,6 @@
 import { apiFetch } from './apiClient';
 import type {
+  DashboardData,
   Deployment,
   DeploymentCreateInput,
   DeploymentListFilters,
@@ -46,4 +47,9 @@ export function cancelDeployment(id: string): Promise<Deployment> {
 /** Contadores do painel de Monitoramento, sobre todas as implantações. */
 export function getDeploymentOverview(): Promise<DeploymentOverview> {
   return apiFetch<DeploymentOverview>('/deployments/summary');
+}
+
+/** Resumo da tela inicial: máquinas, implantações, atividade e status do sistema. */
+export function getDashboard(): Promise<DashboardData> {
+  return apiFetch<DashboardData>('/dashboard');
 }
