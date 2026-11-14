@@ -20,20 +20,11 @@ function Svg({ className = 'h-5 w-5', children }: IconProps & { children: ReactN
   );
 }
 
-export function UserIcon(props: IconProps) {
-  return <Svg {...props}><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></Svg>;
-}
-export function LockIcon(props: IconProps) {
-  return <Svg {...props}><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></Svg>;
-}
 export function EyeIcon(props: IconProps) {
   return <Svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Svg>;
 }
 export function EyeOffIcon(props: IconProps) {
   return <Svg {...props}><path d="M3 3l18 18" /><path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></Svg>;
-}
-export function DashboardIcon(props: IconProps) {
-  return <Svg {...props}><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></Svg>;
 }
 export function MonitorIcon(props: IconProps) {
   return <Svg {...props}><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></Svg>;
@@ -83,9 +74,6 @@ export function PowerIcon(props: IconProps) {
 export function CheckCircleIcon(props: IconProps) {
   return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></Svg>;
 }
-export function CheckIcon(props: IconProps) {
-  return <Svg {...props}><path d="M5 12l5 5 9-10" /></Svg>;
-}
 export function PlayIcon(props: IconProps) {
   return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l6-3.5z" /></Svg>;
 }
@@ -94,12 +82,6 @@ export function ChevronLeftIcon(props: IconProps) {
 }
 export function ChevronRightIcon(props: IconProps) {
   return <Svg {...props}><path d="M9 18l6-6-6-6" /></Svg>;
-}
-export function InfoIcon(props: IconProps) {
-  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></Svg>;
-}
-export function ShieldIcon(props: IconProps) {
-  return <Svg {...props}><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z" /></Svg>;
 }
 export function UploadIcon(props: IconProps) {
   return <Svg {...props}><path d="M12 16V4" /><path d="M7 9l5-5 5 5" /><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" /></Svg>;

@@ -133,7 +133,6 @@ export function MachinesPage() {
 
   const filtersActive = search.trim() !== '' || department !== ALL || presence !== ALL;
   const missingCount = machines.filter((m) => !m.seenInLastSync).length;
-  const unverifiedCount = machines.filter((m) => m.status === 'UNKNOWN').length;
 
   // ---------- seleção (RF03) ----------
 
@@ -236,7 +235,6 @@ export function MachinesPage() {
         <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <Chip>Total: {machines.length}</Chip>
-            <Chip>Não verificadas: {unverifiedCount}</Chip>
             {missingCount > 0 && <Chip tone="amber">Não encontradas no AD: {missingCount}</Chip>}
             {filtersActive && (
               <span className="text-slate-500">

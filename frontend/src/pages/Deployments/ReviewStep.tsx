@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AlertTriangleIcon, InfoIcon, PlayIcon, PowerIcon, ShieldIcon } from '../../components/icons';
+import { AlertTriangleIcon } from '../../components/icons';
 import type { Machine } from '../../types/machine';
 import type { Software } from '../../types/software';
 import { formatBytes } from '../../utils/format';
@@ -76,17 +76,16 @@ export function ReviewStep({ machines, software }: ReviewProps) {
           </ol>
 
           <div className="space-y-2">
-            <Notice tone="amber" icon={<ShieldIcon className="h-4 w-4" />}>
+            <Notice tone="amber">
               O instalador é <strong>executado como administrador</strong> nas máquinas selecionadas.
             </Notice>
-            <Notice tone="blue" icon={<PowerIcon className="h-4 w-4" />}>
+            <Notice tone="blue">
               O sistema <strong>nunca reinicia as máquinas</strong>. Se o instalador pedir reinício, a instalação é
               registrada com o aviso "reinício pendente".
             </Notice>
           </div>
 
-          <p className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-blue-900">
-            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-blue-900">
             <span>
               <strong>Resumo:</strong> {software.name} {software.version} será instalado em{' '}
               {plural(machines.length, 'máquina', 'máquinas')}. Cópia por máquina: {formatBytes(size)}
@@ -110,10 +109,7 @@ export function ConfirmStep({ machineCount, software, error }: ConfirmProps) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white px-4 py-8 shadow-sm sm:px-6">
       <div className="mx-auto max-w-lg text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-700">
-          <PlayIcon className="h-7 w-7" />
-        </span>
-        <h2 className="mt-4 text-lg font-semibold text-slate-900">Confirmar implantação</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Confirmar implantação</h2>
         <p className="mt-1 text-sm text-slate-500">
           Você está prestes a iniciar a implantação remota. Esta ação instala o software selecionado nas máquinas de
           destino.
@@ -163,12 +159,13 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Notice({ tone, icon, children }: { tone: 'amber' | 'blue'; icon: ReactNode; children: ReactNode }) {
+/** Aviso; `icon` só para sinal de alerta (o triângulo), nunca enfeite. */
+function Notice({ tone, icon, children }: { tone: 'amber' | 'blue'; icon?: ReactNode; children: ReactNode }) {
   const styles =
     tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700';
   return (
     <p className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${styles}`}>
-      <span className="mt-0.5 shrink-0">{icon}</span>
+      {icon && <span className="mt-0.5 shrink-0">{icon}</span>}
       <span>{children}</span>
     </p>
   );

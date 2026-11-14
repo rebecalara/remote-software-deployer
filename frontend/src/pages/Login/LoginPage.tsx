@@ -2,13 +2,13 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
-import { EyeIcon, EyeOffIcon, LockIcon, UserIcon } from '../../components/icons';
+import { EyeIcon, EyeOffIcon } from '../../components/icons';
 
 export function LoginPage() {
   const { login, isAuthenticated, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
+  const from = (location.state as { from?: string } | null)?.from ?? '/machines';
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -37,10 +37,6 @@ export function LoginPage() {
     <div className="flex min-h-screen">
       {/* Painel institucional — some em telas pequenas */}
       <aside className="relative hidden w-1/2 flex-col overflow-hidden bg-slate-950 text-white lg:flex">
-        {/* Fundo decorativo: dois círculos nos cantos */}
-        <div className="pointer-events-none absolute -top-48 -right-48 h-[30rem] w-[30rem] rounded-full bg-blue-800/15" />
-        <div className="pointer-events-none absolute -bottom-56 -left-40 h-[32rem] w-[32rem] rounded-full bg-blue-900/25" />
-
         <div className="relative flex flex-1 flex-col items-center justify-center px-12 text-center">
           {/* O PNG tem margem branca em volta do quadro cinza; o scale + overflow só recorta essa margem */}
           <div className="h-36 w-36 overflow-hidden rounded-3xl shadow-2xl shadow-black/50 ring-1 ring-white/10 xl:h-40 xl:w-40">
@@ -51,15 +47,13 @@ export function LoginPage() {
             />
           </div>
 
-          <div className="mt-10 h-px w-12 bg-blue-500/60" />
-
           <h2 className="mt-10 text-4xl leading-tight font-semibold tracking-tight xl:text-5xl">
             Remote Software
             <span className="block font-bold text-blue-400">Deployer</span>
           </h2>
 
           <p className="mt-5 max-w-md text-base text-balance text-slate-400">
-            Plataforma de gerenciamento e implantação de software
+            Implantação remota de software nas estações da Prefeitura
           </p>
         </div>
 
@@ -101,7 +95,6 @@ export function LoginPage() {
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-5" noValidate>
               <Field label="Usuário" htmlFor="username">
-                <UserIcon className="h-4 w-4 text-slate-400" />
                 <input
                   id="username"
                   type="text"
@@ -116,7 +109,6 @@ export function LoginPage() {
               </Field>
 
               <Field label="Senha" htmlFor="password">
-                <LockIcon className="h-4 w-4 text-slate-400" />
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
@@ -151,10 +143,6 @@ export function LoginPage() {
                 {submitting ? 'Entrando…' : 'Entrar'}
               </button>
             </form>
-
-            <p className="mt-8 border-t border-slate-100 pt-6 text-center text-xs text-slate-500">
-              Problemas com acesso? Contate o suporte de TI.
-            </p>
           </div>
         </div>
       </main>

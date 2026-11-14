@@ -11,7 +11,6 @@ interface SidebarProps {
 }
 
 const availableItems = NAV_ITEMS.filter((item) => item.available);
-const upcomingItems = NAV_ITEMS.filter((item) => !item.available);
 
 function SectionTitle({ collapsed, className = '', children }: { collapsed: boolean; className?: string; children: string }) {
   // Recolhido: só um divisor, para manter a separação entre os grupos.
@@ -69,13 +68,6 @@ export function Sidebar({ collapsed, onToggleCollapsed, onCloseMobile, onLogout 
         )}
       </div>
 
-      {!collapsed && (
-        <div className="border-b border-white/5 px-5 py-4">
-          <p className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase">Organização</p>
-          <p className="mt-1 text-sm font-medium text-slate-200">Prefeitura de Joinville</p>
-        </div>
-      )}
-
       {/* Navegação */}
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Menu principal">
         <SectionTitle collapsed={collapsed}>Menu principal</SectionTitle>
@@ -98,28 +90,6 @@ export function Sidebar({ collapsed, onToggleCollapsed, onCloseMobile, onLogout 
             </li>
           ))}
         </ul>
-
-        {/* Itens dos próximos blocos: mesma ordem do mockup, agrupados em vez de um
-            selo por item (o selo na mesma linha cortava "Catálogo de Software"). */}
-        {upcomingItems.length > 0 && (
-          <>
-            <SectionTitle collapsed={collapsed} className="mt-6">Em breve</SectionTitle>
-            <ul className="space-y-1">
-              {upcomingItems.map(({ label, path, icon: Icon, block }) => (
-                <li key={path}>
-                  <span
-                    aria-disabled="true"
-                    title={`${label} — disponível no ${block}`}
-                    className={`${itemBase} cursor-not-allowed text-slate-600 ${collapsed ? 'justify-center' : ''}`}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    {!collapsed && <span className="truncate">{label}</span>}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
       </nav>
 
       {/* Rodapé */}

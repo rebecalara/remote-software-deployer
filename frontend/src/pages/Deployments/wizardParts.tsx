@@ -1,13 +1,12 @@
-import type { ComponentType, ReactNode } from 'react';
-import { CheckIcon, MonitorIcon, PackageIcon, PlayIcon, type IconProps } from '../../components/icons';
+import type { ReactNode } from 'react';
 
 // Peças visuais compartilhadas pelos passos da Nova Instalação.
 
-export const STEPS: Array<{ label: string; icon: ComponentType<IconProps> }> = [
-  { label: 'Selecionar máquinas', icon: MonitorIcon },
-  { label: 'Selecionar software', icon: PackageIcon },
-  { label: 'Revisar instalação', icon: CheckIcon },
-  { label: 'Executar', icon: PlayIcon },
+export const STEPS: Array<{ label: string }> = [
+  { label: 'Selecionar máquinas' },
+  { label: 'Selecionar software' },
+  { label: 'Revisar instalação' },
+  { label: 'Executar' },
 ];
 
 export function Stepper({ current }: { current: number }) {
@@ -17,13 +16,12 @@ export function Stepper({ current }: { current: number }) {
         {STEPS.map((step, index) => {
           const done = index < current;
           const active = index === current;
-          const Icon = done ? CheckIcon : step.icon;
           return (
             <li key={step.label} className={`flex items-start ${index < STEPS.length - 1 ? 'flex-1' : ''}`}>
               <div className="flex flex-col items-center gap-2 text-center">
                 <span
                   aria-current={active ? 'step' : undefined}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-semibold ${
                     done
                       ? 'border-blue-700 bg-blue-700 text-white'
                       : active
@@ -31,7 +29,7 @@ export function Stepper({ current }: { current: number }) {
                         : 'border-slate-200 bg-white text-slate-400'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  {index + 1}
                 </span>
                 <span
                   className={`hidden text-xs font-medium whitespace-nowrap sm:block ${

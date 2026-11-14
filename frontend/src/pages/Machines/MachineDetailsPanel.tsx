@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { MonitorIcon, XIcon } from '../../components/icons';
+import { XIcon } from '../../components/icons';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import type { Machine } from '../../types/machine';
 import { MissingFromAdBadge, StatusBadge } from './MachineBadges';
@@ -10,8 +10,8 @@ interface MachineDetailsPanelProps {
   onClose: () => void;
 }
 
-// Só dado real: o que o AD fornece. CPU/RAM/disco, IP e software instalado
-// dependem de WinRM (Bloco 4 em diante) — ver DECISIONS.md, recorte do mockup.
+// Só dado real: o que o AD fornece. IP, CPU/RAM/disco e software instalado não vêm
+// do AD — ver DECISIONS.md, recorte do mockup.
 export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPanelProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -37,10 +37,7 @@ export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPan
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-5">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-            <MonitorIcon className="h-5 w-5" />
-          </div>
+        <div>
           <div className="min-w-0">
             <p className="font-mono text-base font-semibold break-all text-slate-900">{machine.hostname}</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -53,7 +50,6 @@ export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPan
         <dl className="mt-6 space-y-3 text-sm">
           <Row label="Sistema operacional">{machine.operatingSystem ?? <Muted>Não informado no AD</Muted>}</Row>
           <Row label="Setor">{machine.department ?? <Muted>Sem OU de setor</Muted>}</Row>
-          <Row label="Endereço IP">{machine.ipAddress ?? <Muted>Não disponível no AD</Muted>}</Row>
           <Row label="Confirmada no AD em">
             {formatDateTime(machine.lastSync)}
             {machine.lastSync && <span className="block text-xs text-slate-400">{formatRelative(machine.lastSync, now)}</span>}
@@ -67,10 +63,6 @@ export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPan
             mas não pode ser selecionada para implantação.
           </p>
         )}
-
-        <p className="mt-6 text-xs text-slate-400">
-          O status de conexão (online/offline) será verificado a partir do módulo de monitoramento.
-        </p>
       </div>
     </aside>
   );

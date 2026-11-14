@@ -273,10 +273,7 @@ function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRest
   const count = deployment.targets.length;
   return (
     <section className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
-      <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-        <CheckCircleIcon className="h-8 w-8" />
-      </span>
-      <h2 className="mt-4 text-xl font-semibold text-slate-900">Implantação iniciada</h2>
+      <h2 className="text-xl font-semibold text-slate-900">Implantação iniciada</h2>
       <p className="mt-1 text-sm text-slate-500">
         A instalação foi enfileirada para <strong>{plural(count, 'máquina', 'máquinas')}</strong> e segue em segundo
         plano.

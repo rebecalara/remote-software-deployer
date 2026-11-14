@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react';
 import {
   ActivityIcon,
-  DashboardIcon,
   HistoryIcon,
   MonitorIcon,
   PackageIcon,
@@ -15,14 +14,13 @@ export interface NavItem {
   /** Título mostrado no cabeçalho quando a rota está ativa. */
   title: string;
   icon: ComponentType<IconProps>;
-  /** false = aparece acinzentado com "Em breve" e sem link. Virar true quando o bloco existir. */
+  /** false = fica fora do menu até o bloco existir. Virar true quando ele existir. */
   available: boolean;
   block?: string;
 }
 
 // Lista única do menu: cada bloco novo só muda `available` aqui.
 export const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', path: '/dashboard', title: 'Dashboard', icon: DashboardIcon, available: true },
   { label: 'Máquinas', path: '/machines', title: 'Gerenciamento de Máquinas', icon: MonitorIcon, available: true },
   { label: 'Catálogo de Software', path: '/software', title: 'Catálogo de Software', icon: PackageIcon, available: true },
   { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true },
