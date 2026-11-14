@@ -2,7 +2,8 @@
 # Prepara o OpenLDAP LOCAL (container openldap-dev) para o Bloco 2:
 #   1. conta de serviço svc-rsd-leitura
 #   2. máquinas fictícias em ou=computers
-#   3. regra de ACL: leitura só em ou=computers, só para a conta de serviço
+#   3. usuário de login fictício viewer (perfil VIEWER no banco) em ou=people
+#   4. regra de ACL: leitura só em ou=computers, só para a conta de serviço
 #
 # Idempotente: pode rodar de novo sem duplicar nada.
 # Não usa senha de admin: aplica via ldapi + SASL EXTERNAL como root do container.
@@ -34,6 +35,7 @@ add_entries() {
 
 add_entries services.dev.ldif
 add_entries computers.dev.ldif
+add_entries people.dev.ldif
 
 echo "==> acl-leitura-computers.ldif"
 acl=$(ldap_exec ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b "olcDatabase={1}mdb,cn=config" \
