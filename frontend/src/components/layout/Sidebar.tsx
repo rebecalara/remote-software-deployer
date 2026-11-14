@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { LogOutIcon, MenuIcon, XIcon } from '../icons';
 import { NAV_ITEMS } from './navItems';
 
@@ -10,7 +11,6 @@ interface SidebarProps {
   onLogout: () => void;
 }
 
-const availableItems = NAV_ITEMS.filter((item) => item.available);
 
 function SectionTitle({ collapsed, className = '', children }: { collapsed: boolean; className?: string; children: string }) {
   // Recolhido: só um divisor, para manter a separação entre os grupos.
@@ -21,6 +21,12 @@ function SectionTitle({ collapsed, className = '', children }: { collapsed: bool
 }
 
 export function Sidebar({ collapsed, onToggleCollapsed, onCloseMobile, onLogout }: SidebarProps) {
+  const { user } = useAuth();
+  // Item com `roles` só aparece para esses perfis (ex.: "Nova Instalação" não aparece
+  // para VIEWER — a página só mostraria o aviso de que ele não pode implantar).
+  const availableItems = NAV_ITEMS.filter(
+    (item) => item.available && (!item.roles || (user !== null && item.roles.includes(user.role))),
+  );
   const itemBase =
     'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors';
 

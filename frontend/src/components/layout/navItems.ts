@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import type { UserRole } from '../../types/auth';
 import {
   ActivityIcon,
   DashboardIcon,
@@ -18,6 +19,8 @@ export interface NavItem {
   /** false = fica fora do menu até o bloco existir. Virar true quando ele existir. */
   available: boolean;
   block?: string;
+  /** Só estes perfis veem o item. Ausente = todos os perfis logados. */
+  roles?: UserRole[];
 }
 
 // Lista única do menu: cada bloco novo só muda `available` aqui.
@@ -25,7 +28,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/dashboard', title: 'Dashboard', icon: DashboardIcon, available: true },
   { label: 'Máquinas', path: '/machines', title: 'Gerenciamento de Máquinas', icon: MonitorIcon, available: true },
   { label: 'Catálogo de Software', path: '/software', title: 'Catálogo de Software', icon: PackageIcon, available: true },
-  { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true },
+  { label: 'Nova Instalação', path: '/deployments/new', title: 'Nova Instalação', icon: PlusCircleIcon, available: true, roles: ['ADMIN', 'OPERATOR'] },
   { label: 'Monitoramento', path: '/monitoring', title: 'Monitoramento', icon: ActivityIcon, available: true },
   { label: 'Histórico', path: '/history', title: 'Histórico', icon: HistoryIcon, available: true },
 ];

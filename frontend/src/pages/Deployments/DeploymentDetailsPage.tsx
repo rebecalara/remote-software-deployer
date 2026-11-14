@@ -28,6 +28,7 @@ function messageOf(err: unknown): string {
 export function DeploymentDetailsPage() {
   const { id = '' } = useParams();
   const { user } = useAuth();
+  // ADMIN/OPERATOR: cancelar pendentes e o atalho para Nova instalação (VIEWER não vê).
   const canCancel = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
   const now = useNow(1_000);
 
@@ -112,9 +113,11 @@ export function DeploymentDetailsPage() {
                 Tentar de novo
               </button>
             )}
-            <Link to="/deployments/new" className="text-blue-700 hover:underline">
-              Nova instalação
-            </Link>
+            {canCancel && (
+              <Link to="/deployments/new" className="text-blue-700 hover:underline">
+                Nova instalação
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -158,12 +161,14 @@ export function DeploymentDetailsPage() {
                 Cancelar pendentes ({c.pending})
               </button>
             )}
-            <Link
-              to="/deployments/new"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Nova instalação
-            </Link>
+            {canCancel && (
+              <Link
+                to="/deployments/new"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Nova instalação
+              </Link>
+            )}
           </div>
         </div>
 
