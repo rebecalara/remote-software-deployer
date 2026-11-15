@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { RefreshIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
@@ -7,12 +7,13 @@ import { SessionExpiredError } from '../../services/apiClient';
 import { getDeploymentOverview, listDeployments } from '../../services/deploymentService';
 import type { DeploymentOverview, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime } from '../../utils/format';
-import { Counter, LiveIndicator, StatusBadge, countsText, durationText } from '../Deployments/deploymentUi';
+import { Counter, LiveIndicator, MineToggle, StatusBadge, countsText, durationText } from '../Deployments/deploymentUi';
 
 // Painel de Monitoramento (Bloco 5, RF06/RF10) — página inicial do sistema. Contadores
 // reais sobre todas as implantações e a lista das mais recentes, cada uma levando ao
 // acompanhamento (/deployments/:id). Polling de 3 s SÓ enquanto houver implantação em
-// andamento (PLANNING §9: sem WebSocket no MVP).
+// andamento (PLANNING §9: sem WebSocket no MVP). O alternador "Todas / Minhas" (?mine=true
+// na URL, padrão Todas) filtra só a lista; os contadores são sempre de todas.
 const POLL_MS = 3_000;
 const RECENT = 20;
 
@@ -25,6 +26,8 @@ export function MonitoringPage() {
   const canDeploy = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
   const navigate = useNavigate();
   const now = useNow(1_000);
+  const [params, setParams] = useSearchParams();
+  const mine = params.get('mine') === 'true';
 
   const [overview, setOverview] = useState<DeploymentOverview | null>(null);
   const [recent, setRecent] = useState<DeploymentSummary[] | null>(null);
@@ -33,7 +36,7 @@ export function MonitoringPage() {
 
   const load = useCallback(async () => {
     try {
-      const [o, page] = await Promise.all([getDeploymentOverview(), listDeployments({ pageSize: RECENT })]);
+      const [o, page] = await Promise.all([getDeploymentOverview(), listDeployments({ pageSize: RECENT, mine })]);
       setOverview(o);
       setRecent(page.items);
       setTotal(page.total);
@@ -41,7 +44,7 @@ export function MonitoringPage() {
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setError(messageOf(err));
     }
-  }, []);
+  }, [mine]);
 
   useEffect(() => {
     void load();
@@ -77,7 +80,16 @@ export function MonitoringPage() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-slate-700">Implantações recentes</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-sm font-semibold text-slate-700">Implantações recentes</h2>
+          <MineToggle
+            mine={mine}
+            onChange={(value) => {
+              setRecent(null);
+              setParams(value ? { mine: 'true' } : {}, { replace: true });
+            }}
+          />
+        </div>
         <div className="flex items-center gap-2 text-xs">
           <LiveIndicator live={live} idleText="Nenhuma implantação em andamento" />
           <button
@@ -102,7 +114,9 @@ export function MonitoringPage() {
           <p className="px-6 py-12 text-center text-sm text-slate-500">{error ? 'Sem dados.' : 'Carregando…'}</p>
         ) : recent.length === 0 ? (
           <div className="px-6 py-12 text-center">
-            <p className="text-sm font-medium text-slate-700">Nenhuma implantação ainda.</p>
+            <p className="text-sm font-medium text-slate-700">
+              {mine ? 'Você ainda não criou nenhuma implantação.' : 'Nenhuma implantação ainda.'}
+            </p>
             {canDeploy && (
               <Link to="/deployments/new" className="mt-2 inline-block text-sm font-medium text-blue-700 hover:underline">
                 Nova instalação
@@ -164,7 +178,7 @@ export function MonitoringPage() {
       {recent !== null && total > recent.length && (
         <p className="text-xs text-slate-500">
           Mostrando as {recent.length} mais recentes de {total}.{' '}
-          <Link to="/history" className="font-medium text-blue-700 hover:underline">
+          <Link to={mine ? '/history?mine=true' : '/history'} className="font-medium text-blue-700 hover:underline">
             Ver o histórico completo
           </Link>
         </p>

@@ -15,6 +15,7 @@ const DEP = '44444444-4444-4444-8444-444444444444';
 const T1 = '55555555-5555-4555-8555-555555555555';
 const T2 = '66666666-6666-4666-8666-666666666666';
 const T3 = '77777777-7777-4777-8777-777777777777';
+const ME = '88888888-8888-4888-8888-888888888888';
 const at = (s: number) => new Date(Date.UTC(2026, 10, 12, 10, 0, s));
 
 function depRow(targets: Array<Record<string, unknown>>, overrides: Record<string, unknown> = {}) {
@@ -52,7 +53,7 @@ describe('DeploymentsService.list e get', () => {
     prisma.deployment.findMany.mockResolvedValue([
       depRow([{ status: 'SUCCEEDED' }, { status: 'RUNNING' }, { status: 'PENDING' }, { status: 'FAILED' }]),
     ]);
-    const page = await service.list(parseDeploymentListQuery({ page: '3', pageSize: '10' }));
+    const page = await service.list(parseDeploymentListQuery({ page: '3', pageSize: '10' }), ME);
     const [item] = page.items;
 
     expect(page).toMatchObject({ total: 57, page: 3, pageSize: 10 });
@@ -63,6 +64,15 @@ describe('DeploymentsService.list e get', () => {
     expect(item.counts).toEqual({ total: 4, pending: 1, running: 1, succeeded: 1, failed: 1, cancelled: 0 });
     expect(item).not.toHaveProperty('targets');
     expect(item).toMatchObject({ id: DEP, startedAt: at(1).toISOString(), finishedAt: null });
+  });
+
+  it('"minhas": página e total filtrados pelo usuário recebido (o do token)', async () => {
+    const { prisma, service } = setup();
+    prisma.deployment.count.mockResolvedValue(0);
+    prisma.deployment.findMany.mockResolvedValue([]);
+    await service.list(parseDeploymentListQuery({ mine: 'true', status: 'FAILED' }), ME);
+    expect(prisma.deployment.count).toHaveBeenCalledWith({ where: { status: 'FAILED', userId: ME } });
+    expect(prisma.deployment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: 'FAILED', userId: ME } }));
   });
 
   it('detalhe traz cada máquina com o último passo registrado', async () => {
@@ -193,6 +203,14 @@ describe('DeploymentsController — permissões', () => {
   const rolesOf = (method: keyof DeploymentsController) =>
     new Reflector().get<UserRole[] | undefined>(ROLES_KEY, DeploymentsController.prototype[method]);
 
+  it('lista: o usuário de "minhas" vem do token, nunca da query', async () => {
+    const list = jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 });
+    const controller = new DeploymentsController({ list } as never);
+    await controller.list({ mine: 'true', userId: 'outro' }, { user: { sub: ME, username: 'viewer' } } as never);
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ mine: true }), ME);
+    expect(deploymentListWhere(list.mock.calls[0][0], list.mock.calls[0][1])).toEqual({ userId: ME });
+  });
+
   it('consultar é para qualquer usuário logado (inclusive VIEWER)', () => {
     expect(rolesOf('list')).toBeUndefined();
     expect(rolesOf('get')).toBeUndefined();
@@ -206,10 +224,14 @@ describe('DeploymentsController — permissões', () => {
 
 describe('deploymentListWhere (filtros do Histórico)', () => {
   it('sem filtro, sem condição', () => {
-    expect(deploymentListWhere(parseDeploymentListQuery({}))).toEqual({});
+    expect(deploymentListWhere(parseDeploymentListQuery({}), ME)).toEqual({});
   });
 
-  it('combina período, status, software e máquina', () => {
+  it('sem "minhas", o usuário logado não restringe nada', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({ mine: 'false' }), ME)).toEqual({});
+  });
+
+  it('combina período, status, software, máquina e "minhas"', () => {
     const where = deploymentListWhere(
       parseDeploymentListQuery({
         from: '2026-11-01T03:00:00.000Z',
@@ -217,18 +239,21 @@ describe('deploymentListWhere (filtros do Histórico)', () => {
         status: 'FAILED',
         softwareId: SW_ID,
         machine: ' ws-adm ',
+        mine: 'true',
       }),
+      ME,
     );
     expect(where).toEqual({
       status: 'FAILED',
       softwareId: SW_ID,
       createdAt: { gte: new Date('2026-11-01T03:00:00.000Z'), lt: new Date('2026-11-15T03:00:00.000Z') },
       targets: { some: { machine: { hostname: { contains: 'ws-adm', mode: 'insensitive' } } } },
+      userId: ME,
     });
   });
 
   it('só uma das datas', () => {
-    expect(deploymentListWhere(parseDeploymentListQuery({ from: '2026-11-01T03:00:00Z' }))).toEqual({
+    expect(deploymentListWhere(parseDeploymentListQuery({ from: '2026-11-01T03:00:00Z' }), ME)).toEqual({
       createdAt: { gte: new Date('2026-11-01T03:00:00Z') },
     });
   });

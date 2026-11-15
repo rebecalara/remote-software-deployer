@@ -86,6 +86,8 @@ export interface DeploymentListFilters {
   machine?: string;
   from?: string;
   to?: string;
+  /** Só as criadas pelo usuário logado (o backend identifica pelo token). */
+  mine?: boolean;
 }
 
 /** GET /dashboard — resumo da tela inicial (espelha backend/src/dashboard/dashboard.service.ts). */

@@ -182,11 +182,11 @@ export class DeploymentsService {
 
   /**
    * Mais recentes primeiro, com filtros (Histórico, Bloco 6): período de criação,
-   * status, software e parte do nome de uma das máquinas. O total vem na mesma
-   * transação de leitura da página.
+   * status, software, parte do nome de uma das máquinas e "minhas" (criadas por
+   * `requesterId`, que vem do token). O total vem na mesma transação de leitura da página.
    */
-  async list(query: DeploymentListQuery): Promise<DeploymentPage> {
-    const where = deploymentListWhere(query);
+  async list(query: DeploymentListQuery, requesterId: string): Promise<DeploymentPage> {
+    const where = deploymentListWhere(query, requesterId);
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.deployment.count({ where }),
       this.prisma.deployment.findMany({
@@ -354,8 +354,9 @@ export function toDeploymentView(d: DeploymentWithRelations): DeploymentView {
 }
 
 /** Filtros da lista → WHERE do Prisma (exportado para teste). */
-export function deploymentListWhere(query: DeploymentListQuery): Prisma.DeploymentWhereInput {
+export function deploymentListWhere(query: DeploymentListQuery, requesterId: string): Prisma.DeploymentWhereInput {
   const where: Prisma.DeploymentWhereInput = {};
+  if (query.mine) where.userId = requesterId;
   if (query.status) where.status = query.status;
   if (query.softwareId) where.softwareId = query.softwareId;
   if (query.from || query.to) {

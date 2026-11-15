@@ -79,6 +79,11 @@ export interface DeploymentListQuery {
   from: Date | null;
   /** Criada antes de (exclusive). */
   to: Date | null;
+  /**
+   * Só as criadas pelo usuário logado. O id do usuário NUNCA vem da query: o
+   * controller o tira do token e o passa ao service à parte.
+   */
+  mine: boolean;
 }
 
 /**
@@ -127,6 +132,8 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
   const from = instant('from', 'Data inicial');
   const to = instant('to', 'Data final');
   if (from && to && from >= to) throw invalid('to', 'A data final deve ser depois da inicial.');
+  const mine = text('mine');
+  if (mine !== null && mine !== 'true' && mine !== 'false') throw invalid('mine', 'Use mine=true ou mine=false.');
 
   return {
     page: positiveInt('page', 1, 100_000, 'A página'),
@@ -136,5 +143,6 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
     machine,
     from,
     to,
+    mine: mine === 'true',
   };
 }

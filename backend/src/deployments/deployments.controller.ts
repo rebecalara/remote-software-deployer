@@ -37,10 +37,11 @@ export class DeploymentsController {
    * Leitura para qualquer usuário logado. Mais recentes primeiro, paginada
    * (?page=, ?pageSize= até 100) e com filtros (?status=, ?softwareId=, ?machine=,
    * ?from= e ?to= em ISO 8601). Filtro inválido = 400 com o campo.
+   * ?mine=true traz só as criadas pelo usuário logado — o id sai do token, nunca da query.
    */
   @Get()
-  list(@Query() query: Record<string, unknown>): Promise<DeploymentPage> {
-    return this.deploymentsService.list(parseDeploymentListQuery(query));
+  list(@Query() query: Record<string, unknown>, @Req() req: AuthenticatedRequest): Promise<DeploymentPage> {
+    return this.deploymentsService.list(parseDeploymentListQuery(query), req.user!.sub);
   }
 
   /**

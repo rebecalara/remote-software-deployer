@@ -94,3 +94,29 @@ export function durationText(startIso: string | null, endIso: string | null, now
   const end = endIso ? new Date(endIso).getTime() : running ? now : null;
   return end === null ? '—' : formatDuration(end - new Date(startIso).getTime());
 }
+
+/**
+ * Alternador "Todas / Minhas implantações" (Histórico e Monitoramento). "Minhas" vira
+ * ?mine=true na API; quem é "eu" o backend tira do token, nunca da tela.
+ */
+export function MineToggle({ mine, onChange }: { mine: boolean; onChange: (mine: boolean) => void }) {
+  const option = (value: boolean, label: string) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={mine === value}
+      onClick={() => mine !== value && onChange(value)}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
+        mine === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+      }`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div role="radiogroup" aria-label="Quais implantações mostrar" className="inline-flex rounded-lg bg-slate-100 p-1">
+      {option(false, 'Todas')}
+      {option(true, 'Minhas implantações')}
+    </div>
+  );
+}

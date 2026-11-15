@@ -25,6 +25,7 @@ describe('parseDeploymentListQuery', () => {
       machine: null,
       from: null,
       to: null,
+      mine: false,
     });
   });
 
@@ -55,7 +56,19 @@ describe('parseDeploymentListQuery', () => {
       machine: 'WS-ADM',
       from: new Date('2026-11-01T03:00:00.000Z'),
       to: new Date('2026-11-02T03:00:00.000Z'),
+      mine: false,
     });
+  });
+
+  it('mine=true liga o filtro "minhas"; mine=false ou ausente, desliga', () => {
+    expect(parseDeploymentListQuery({ mine: 'true' }).mine).toBe(true);
+    expect(parseDeploymentListQuery({ mine: 'false' }).mine).toBe(false);
+    expect(parseDeploymentListQuery({ mine: '' }).mine).toBe(false);
+  });
+
+  it('nenhum id de usuário vindo da query entra no resultado', () => {
+    const parsed = parseDeploymentListQuery({ mine: 'true', userId: 'outro', user: 'outro' });
+    expect(Object.values(parsed)).not.toContain('outro');
   });
 
   it.each([
@@ -74,6 +87,9 @@ describe('parseDeploymentListQuery', () => {
     [{ from: '2026-11-02T00:00:00Z', to: '2026-11-01T00:00:00Z' }, 'to'],
     [{ from: '2026-11-01T00:00:00Z', to: '2026-11-01T00:00:00Z' }, 'to'],
     [{ status: ['FAILED', 'SUCCEEDED'] }, 'status'],
+    [{ mine: '1' }, 'mine'],
+    [{ mine: 'yes' }, 'mine'],
+    [{ mine: ['true', 'true'] }, 'mine'],
   ])('recusa %p no campo %p (filtro ignorado em silêncio pareceria aplicado)', (query, field) => {
     expect(fieldOf(query)).toBe(field);
   });

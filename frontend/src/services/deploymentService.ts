@@ -22,7 +22,7 @@ export function createDeployment(input: DeploymentCreateInput): Promise<Deployme
 export function listDeployments(filters: DeploymentListFilters = {}): Promise<DeploymentPage> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
-    if (value !== undefined && value !== '') params.set(key, String(value));
+    if (value !== undefined && value !== '' && value !== false) params.set(key, String(value));
   }
   const query = params.toString();
   return apiFetch<DeploymentPage>(`/deployments${query ? `?${query}` : ''}`);

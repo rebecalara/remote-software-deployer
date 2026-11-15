@@ -7,10 +7,10 @@ import { listSoftware } from '../../services/softwareService';
 import type { DeploymentListFilters, DeploymentPage, DeploymentStatus } from '../../types/deployment';
 import type { Software } from '../../types/software';
 import { formatDateTime } from '../../utils/format';
-import { STATUS_LABEL, StatusBadge, countsText, durationText } from '../Deployments/deploymentUi';
+import { MineToggle, STATUS_LABEL, StatusBadge, countsText, durationText } from '../Deployments/deploymentUi';
 
 // Histórico (Bloco 6, RF07/RF13): implantações passadas com filtros e paginação. Os
-// filtros ficam na URL (?from=&to=&status=&softwareId=&machine=&page=): voltar no
+// filtros ficam na URL (?mine=&from=&to=&status=&softwareId=&machine=&page=): voltar no
 // navegador ou copiar o link preserva a busca. Abrir uma implantação leva ao
 // acompanhamento, que mostra os logs de cada máquina (RF13).
 const PAGE_SIZE = 20;
@@ -41,6 +41,7 @@ export function HistoryPage() {
   const softwareId = params.get('softwareId') ?? '';
   const machine = params.get('machine') ?? '';
   const page = Math.max(1, Number(params.get('page')) || 1);
+  const mine = params.get('mine') === 'true';
 
   const [machineInput, setMachineInput] = useState(machine);
   const [software, setSoftware] = useState<Software[]>([]);
@@ -92,8 +93,9 @@ export function HistoryPage() {
       machine: machine || undefined,
       from: from ? startOfDayIso(from) : undefined,
       to: to ? endOfDayIso(to) : undefined,
+      mine: mine || undefined,
     }),
-    [page, status, softwareId, machine, from, to],
+    [page, status, softwareId, machine, from, to, mine],
   );
 
   useEffect(() => {
@@ -116,7 +118,7 @@ export function HistoryPage() {
     };
   }, [filters, periodInvalid]);
 
-  const filtersActive = from || to || status || softwareId || machine;
+  const filtersActive = mine || from || to || status || softwareId || machine;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const firstItem = data && data.total > 0 ? (data.page - 1) * data.pageSize + 1 : 0;
   const lastItem = data ? Math.min(data.page * data.pageSize, data.total) : 0;
@@ -124,6 +126,8 @@ export function HistoryPage() {
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
+      <MineToggle mine={mine} onChange={(value) => update({ mine: value ? 'true' : '' })} />
+
       {/* Filtros */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
