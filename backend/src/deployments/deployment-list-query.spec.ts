@@ -28,7 +28,13 @@ describe('parseDeploymentListQuery', () => {
       mine: false,
       state: null,
       finishedFrom: null,
+      action: null,
     });
+  });
+
+  it('action: instalação ou desinstalação', () => {
+    expect(parseDeploymentListQuery({ action: 'UNINSTALL' }).action).toBe('UNINSTALL');
+    expect(parseDeploymentListQuery({ action: 'INSTALL' }).action).toBe('INSTALL');
   });
 
   it('state e finishedFrom: em andamento, encerradas e encerradas a partir de um instante', () => {
@@ -69,6 +75,7 @@ describe('parseDeploymentListQuery', () => {
       mine: false,
       state: null,
       finishedFrom: null,
+      action: null,
     });
   });
 
@@ -101,6 +108,8 @@ describe('parseDeploymentListQuery', () => {
     [{ status: ['FAILED', 'SUCCEEDED'] }, 'status'],
     [{ mine: '1' }, 'mine'],
     [{ state: 'RUNNING' }, 'state'],
+    [{ action: 'uninstall' }, 'action'],
+    [{ action: 'REMOVE' }, 'action'],
     [{ state: 'done' }, 'state'],
     [{ finishedFrom: 'ontem' }, 'finishedFrom'],
     [{ state: 'active', finishedFrom: '2026-11-15T12:00:00Z' }, 'finishedFrom'],

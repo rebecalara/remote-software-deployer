@@ -18,6 +18,7 @@ function errorOf(body: unknown): { message: string; field: string } {
 describe('validateDeploymentCreate', () => {
   it('aceita o corpo válido, sem repetir máquinas e sem nome', () => {
     expect(validateDeploymentCreate({ softwareId: SW, machineIds: [M1, M2, M1.toUpperCase()] })).toEqual({
+      action: 'INSTALL',
       softwareId: SW,
       machineIds: [M1, M2],
       name: null,

@@ -1,4 +1,4 @@
-import { DeploymentStatus, InstallType, LogLevel } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus, InstallType, LogLevel } from '@prisma/client';
 import type { DeployResult } from './powershell-executor';
 
 // Regras de resultado (DECISIONS.md, Bloco 4: "códigos de saída, reinício e
@@ -21,9 +21,23 @@ export interface TargetOutcome extends ExitCodeOutcome {
  * (`'x' in result` em vez de `result.ok`: sem strictNullChecks — tsconfig com
  * strict: false — o TypeScript não estreita a união pelo campo booleano.)
  */
-export function interpretResult(result: DeployResult, installType: InstallType): TargetOutcome {
+export function interpretResult(
+  result: DeployResult,
+  installType: InstallType,
+  action: DeploymentAction = DeploymentAction.INSTALL,
+): TargetOutcome {
   if ('exitCode' in result) {
-    return { ...interpretExitCode(result.exitCode, installType), exitCode: result.exitCode };
+    return { ...interpretExitCode(result.exitCode, installType, action), exitCode: result.exitCode };
+  }
+  if ('notInstalled' in result) {
+    return {
+      status: DeploymentStatus.SUCCEEDED,
+      level: LogLevel.WARN,
+      message:
+        `Não estava instalado: o produto (ProductCode ${result.productCode}) não está instalado na máquina. ` +
+        'A desinstalação não foi executada.',
+      exitCode: null,
+    };
   }
   if ('alreadyInstalled' in result) {
     return {
@@ -61,7 +75,50 @@ const MSI_FAILURES: Record<number, string> = {
   1638: 'Outra versão deste produto já está instalada na máquina (código 1638).',
 };
 
-export function interpretExitCode(exitCode: number, installType: InstallType): ExitCodeOutcome {
+/**
+ * Desinstalação (só MSI, msiexec /x). 1605 ("produto desconhecido") só acontece se o
+ * produto sumiu entre a conferência e a execução: é sucesso com o aviso "não estava
+ * instalado" (decisão da autora), não falha.
+ */
+const UNINSTALL_NOT_INSTALLED_1605 =
+  'Não estava instalado: o Windows Installer não reconhece o produto na máquina (código 1605). Nada foi removido.';
+const UNINSTALL_FAILURES: Record<number, string> = {
+  1602: 'A desinstalação foi cancelada na máquina (código 1602).',
+  1603: 'Erro fatal durante a desinstalação (código 1603).',
+  1612:
+    'A origem da instalação não está disponível na máquina (código 1612): o pacote em cache do Windows ' +
+    'Installer pode ter sido apagado. A desinstalação não foi concluída.',
+  1618: 'Outra instalação estava em andamento na máquina (código 1618). Tente de novo mais tarde.',
+  1625: 'A desinstalação foi bloqueada por uma política da máquina (código 1625).',
+};
+const UNINSTALL_SUCCESS_WITH_REBOOT: Record<number, string> = {
+  3010:
+    'Desinstalação concluída. A máquina precisa ser reiniciada para concluí-la (código 3010) — ' +
+    'o sistema não reinicia a máquina.',
+  1641: 'Desinstalação concluída. O desinstalador iniciou o reinício da máquina (código 1641).',
+};
+
+export function interpretExitCode(
+  exitCode: number,
+  installType: InstallType,
+  action: DeploymentAction = DeploymentAction.INSTALL,
+): ExitCodeOutcome {
+  if (action === DeploymentAction.UNINSTALL) {
+    if (exitCode === 0) {
+      return { status: DeploymentStatus.SUCCEEDED, level: LogLevel.INFO, message: 'Desinstalação concluída (código 0).' };
+    }
+    if (exitCode in UNINSTALL_SUCCESS_WITH_REBOOT) {
+      return { status: DeploymentStatus.SUCCEEDED, level: LogLevel.WARN, message: UNINSTALL_SUCCESS_WITH_REBOOT[exitCode] };
+    }
+    if (exitCode === 1605) {
+      return { status: DeploymentStatus.SUCCEEDED, level: LogLevel.WARN, message: UNINSTALL_NOT_INSTALLED_1605 };
+    }
+    return {
+      status: DeploymentStatus.FAILED,
+      level: LogLevel.ERROR,
+      message: UNINSTALL_FAILURES[exitCode] ?? `O desinstalador terminou com o código ${exitCode}, que indica falha.`,
+    };
+  }
   if (exitCode === 0) {
     return { status: DeploymentStatus.SUCCEEDED, level: LogLevel.INFO, message: 'Instalação concluída (código 0).' };
   }

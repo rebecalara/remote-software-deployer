@@ -6,7 +6,11 @@ import { BadRequestException } from '@nestjs/common';
 export const MAX_TARGETS_PER_DEPLOYMENT = 50;
 export const MAX_NAME_LENGTH = 120;
 
+export type DeploymentActionValue = 'INSTALL' | 'UNINSTALL';
+
 export interface DeploymentCreateInput {
+  /** Ausente = INSTALL. Desinstalar só existe para MSI (conferido no service). */
+  action: DeploymentActionValue;
   softwareId: string;
   /** Sem repetição, na ordem em que vieram. */
   machineIds: string[];
@@ -16,7 +20,7 @@ export interface DeploymentCreateInput {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-const ALLOWED_FIELDS = new Set(['softwareId', 'machineIds', 'name']);
+const ALLOWED_FIELDS = new Set(['action', 'softwareId', 'machineIds', 'name']);
 
 export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -25,6 +29,14 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
   const data = body as Record<string, unknown>;
   const unknown = Object.keys(data).find((key) => !ALLOWED_FIELDS.has(key));
   if (unknown) throw invalid(unknown, `Campo não permitido: ${unknown}.`);
+
+  let action: DeploymentActionValue = 'INSTALL';
+  if (data.action !== undefined) {
+    if (data.action !== 'INSTALL' && data.action !== 'UNINSTALL') {
+      throw invalid('action', 'Ação inválida: use INSTALL ou UNINSTALL.');
+    }
+    action = data.action;
+  }
 
   if (typeof data.softwareId !== 'string' || !UUID.test(data.softwareId)) {
     throw invalid('softwareId', 'Selecione um software válido.');
@@ -52,7 +64,7 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
     name = trimmed || null;
   }
 
-  return { softwareId: data.softwareId.toLowerCase(), machineIds, name };
+  return { action, softwareId: data.softwareId.toLowerCase(), machineIds, name };
 }
 
 function invalid(field: string, message: string): BadRequestException {
@@ -88,6 +100,8 @@ export interface DeploymentListQuery {
   state: 'active' | 'finished' | null;
   /** Encerrada a partir de (inclusive). Só faz sentido para as encerradas. */
   finishedFrom: Date | null;
+  /** Instalação ou desinstalação. */
+  action: DeploymentActionValue | null;
 }
 
 /**
@@ -144,6 +158,10 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
   if (finishedFrom && state === 'active') {
     throw invalid('finishedFrom', 'Implantações em andamento ainda não têm data de encerramento.');
   }
+  const action = text('action');
+  if (action !== null && action !== 'INSTALL' && action !== 'UNINSTALL') {
+    throw invalid('action', 'Use action=INSTALL ou action=UNINSTALL.');
+  }
   const mine = text('mine');
   if (mine !== null && mine !== 'true' && mine !== 'false') throw invalid('mine', 'Use mine=true ou mine=false.');
 
@@ -158,5 +176,6 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
     mine: mine === 'true',
     state: state as 'active' | 'finished' | null,
     finishedFrom,
+    action: action as DeploymentActionValue | null,
   };
 }

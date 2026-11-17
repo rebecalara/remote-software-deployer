@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { DeploymentStatus, LogLevel } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus, LogLevel } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { aggregateDeploymentStatus, interpretResult } from './deployment-outcome';
@@ -113,28 +113,43 @@ export class DeploymentRunner implements OnApplicationBootstrap {
         data: { status: DeploymentStatus.RUNNING, startedAt: new Date() },
       });
 
-      log.write(LogLevel.INFO, `Iniciando a instalação de ${software.name} ${software.version} em ${hostname}.`);
+      const action = target.deployment.action;
+      const uninstall = action === DeploymentAction.UNINSTALL;
+      log.write(
+        LogLevel.INFO,
+        `Iniciando a ${uninstall ? 'desinstalação' : 'instalação'} de ${software.name} ${software.version} em ${hostname}.`,
+      );
 
       let result: DeployResult;
-      const installerProblem = await this.installerProblem(software.installerFileName);
-      if (installerProblem) {
-        result = { ok: false, phase: 'validate', reason: 'invalid-input', message: installerProblem };
+      if (uninstall) {
+        // Só o ProductCode vai para a máquina: nada é copiado, e os argumentos do
+        // catálogo (propriedades de instalação) não são repassados.
+        result = software.msiProductCode
+          ? await this.executor.run(
+              { action: 'UNINSTALL', targetId, computerName: hostname, installType: 'MSI', productCode: software.msiProductCode },
+              (event) => log.write(event.level, event.message),
+            )
+          : { ok: false, phase: 'validate', reason: 'invalid-input', message: 'O software não tem ProductCode para desinstalar.' };
       } else {
-        result = await this.executor.run(
-          {
-            targetId,
-            computerName: hostname,
-            installerPath: this.storage.localPath(software.installerFileName!),
-            installerSizeBytes: software.installerSizeBytes ?? 0,
-            sha256: software.installerSha256 ?? '',
-            installType: software.installType,
-            installArgs: software.installArgs,
-          },
-          (event) => log.write(event.level, event.message),
-        );
+        const installerProblem = await this.installerProblem(software.installerFileName);
+        result = installerProblem
+          ? { ok: false, phase: 'validate', reason: 'invalid-input', message: installerProblem }
+          : await this.executor.run(
+              {
+                action: 'INSTALL',
+                targetId,
+                computerName: hostname,
+                installerPath: this.storage.localPath(software.installerFileName!),
+                installerSizeBytes: software.installerSizeBytes ?? 0,
+                sha256: software.installerSha256 ?? '',
+                installType: software.installType,
+                installArgs: software.installArgs,
+              },
+              (event) => log.write(event.level, event.message),
+            );
       }
 
-      const outcome = interpretResult(result, software.installType);
+      const outcome = interpretResult(result, software.installType, action);
       log.write(outcome.level, outcome.message);
       await log.flush();
 

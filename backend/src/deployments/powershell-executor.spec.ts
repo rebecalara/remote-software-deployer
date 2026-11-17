@@ -9,6 +9,7 @@ import {
   DEPLOY_SCRIPT_PATH,
   DeployEvent,
   DeployTargetInput,
+  InstallTargetInput,
   MAX_INSTALL_TIMEOUT_MINUTES,
   MAX_MESSAGE_LENGTH,
   PowerShellExecutor,
@@ -38,8 +39,9 @@ function fakeConfig(overrides: Partial<PowerShellExecutorConfig> = {}): PowerShe
   };
 }
 
-function input(computerName: string, overrides: Partial<DeployTargetInput> = {}): DeployTargetInput {
+function input(computerName: string, overrides: Partial<InstallTargetInput> = {}): InstallTargetInput {
   return {
+    action: 'INSTALL',
     targetId: '11111111-2222-4333-8444-555555555555',
     computerName,
     installerPath: 'C:\\rsd-data\\installers\\0f0e0d0c-0b0a-4908-8706-050403020100.msi',

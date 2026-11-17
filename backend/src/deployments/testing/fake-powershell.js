@@ -33,6 +33,10 @@ process.stdin.on('end', () => {
       log('SHA-256 conferido.', 'INFO', 'verify');
       out({ type: 'result', ok: true, alreadyInstalled: true, productCode: '{23170f69-40c1-2702-2606-000001000000}' });
       return;
+    case 'FAKE-NOT-INSTALLED':
+      log('Sessão WinRM aberta.');
+      out({ type: 'result', ok: true, notInstalled: true, productCode: '{23170f69-40c1-2702-2606-000001000000}' });
+      return;
     case 'FAKE-ALREADY-BAD-CODE':
       out({ type: 'result', ok: true, alreadyInstalled: true, productCode: 'qualquer coisa' });
       return;

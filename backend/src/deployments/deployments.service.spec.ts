@@ -66,7 +66,13 @@ function setup() {
   return { prisma, executor, storage, runner, service };
 }
 
-const input = (overrides = {}) => ({ softwareId: SW_ID, machineIds: [M1, M2], name: null, ...overrides });
+const input = (overrides = {}) => ({
+  action: 'INSTALL' as 'INSTALL' | 'UNINSTALL',
+  softwareId: SW_ID,
+  machineIds: [M1, M2],
+  name: null,
+  ...overrides,
+});
 
 describe('DeploymentsService.create', () => {
   it('cria com as máquinas PENDING, nome gerado, enfileira e devolve na hora', async () => {
@@ -77,6 +83,7 @@ describe('DeploymentsService.create', () => {
       expect.objectContaining({
         data: {
           name: '7-Zip 26.06 — 2 máquinas',
+          action: 'INSTALL',
           user: { connect: { id: 'user-1' } },
           software: { connect: { id: SW_ID } },
           targets: { create: [{ machine: { connect: { id: M1 } } }, { machine: { connect: { id: M2 } } }] },

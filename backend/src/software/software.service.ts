@@ -17,6 +17,7 @@ import {
   InstallerTooLargeError,
   InvalidInstallerHeaderError,
 } from './installer-storage.service';
+import { MsiInfoReader } from './msi-info-reader';
 import { SoftwareCreateInput, SoftwareUpdateInput, validateInstallArgs } from './software-validation';
 
 export interface UserRef {
@@ -44,6 +45,10 @@ export interface SoftwareView {
   installer: InstallerInfo | null;
   /** Contagem real de implantações (0 até o Bloco 4). */
   deploymentCount: number;
+  /** ProductCode do MSI, lido pelo servidor do pacote no envio. null para EXE. */
+  msiProductCode: string | null;
+  /** Desinstalação remota possível: só MSI com ProductCode conhecido. */
+  uninstallAvailable: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: UserRef | null;
@@ -78,6 +83,7 @@ export class SoftwareService implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: InstallerStorageService,
+    private readonly msiReader: MsiInfoReader,
   ) {}
 
   /** Limite de tamanho do instalador, para o controller recusar pelo Content-Length. */
@@ -233,6 +239,11 @@ export class SoftwareService implements OnApplicationBootstrap {
     const saved = await this.storage.save(source, current.installType).catch((err) => {
       throw toHttpUploadError(err);
     });
+    // MSI: o ProductCode é lido do próprio pacote, aqui no servidor, para a
+    // desinstalação não precisar copiar o instalador para a máquina. Se a leitura
+    // falhar, o envio continua valendo — o software só fica sem desinstalação.
+    const msiProductCode =
+      current.installType === InstallType.MSI ? await this.readProductCode(saved.fileName) : null;
 
     let updated: Prisma.BatchPayload;
     try {
@@ -244,6 +255,7 @@ export class SoftwareService implements OnApplicationBootstrap {
           installerSizeBytes: saved.sizeBytes,
           installerSha256: saved.sha256,
           installerUploadedAt: new Date(),
+          msiProductCode,
           updatedById: userId,
         },
       });
@@ -287,6 +299,44 @@ export class SoftwareService implements OnApplicationBootstrap {
     for (const row of rows.filter((r) => !onDisk.has(r.installerFileName!))) {
       this.logger.warn(`Instalador de "${row.name} ${row.version}" não encontrado na pasta: ${row.installerFileName}`);
     }
+
+    // MSI enviado antes da desinstalação existir (ou cuja leitura falhou): tenta ler o
+    // ProductCode agora. Só preenche — nunca altera um código já gravado.
+    if (!this.msiReader.isAvailable) return;
+    const missing = await this.prisma.software.findMany({
+      where: { installType: InstallType.MSI, msiProductCode: null, installerFileName: { not: null } },
+      select: { id: true, installerFileName: true },
+    });
+    for (const s of missing.filter((m) => onDisk.has(m.installerFileName!))) {
+      await this.ensureMsiProductCode(s.id);
+    }
+  }
+
+  /**
+   * ProductCode de um MSI que ainda não o tem: lido do arquivo guardado e gravado.
+   * null = não é MSI, não tem instalador ou a leitura falhou (o motivo vai ao log).
+   * Só grava se o arquivo ainda for o mesmo (um envio simultâneo pode tê-lo trocado).
+   */
+  async ensureMsiProductCode(id: string): Promise<string | null> {
+    const s = await this.prisma.software.findUnique({
+      where: { id },
+      select: { installType: true, msiProductCode: true, installerFileName: true },
+    });
+    if (!s || s.installType !== InstallType.MSI || !s.installerFileName) return null;
+    if (s.msiProductCode) return s.msiProductCode;
+    const code = await this.readProductCode(s.installerFileName);
+    if (!code) return null;
+    await this.prisma.software.updateMany({
+      where: { id, installerFileName: s.installerFileName, msiProductCode: null },
+      data: { msiProductCode: code },
+    });
+    this.logger.log(`ProductCode ${code} lido do instalador do software ${id}.`);
+    return code;
+  }
+
+  private async readProductCode(fileName: string): Promise<string | null> {
+    const result = await this.msiReader.read(this.storage.localPath(fileName));
+    return result.ok ? result.info.productCode : null;
   }
 
   private async deleteFileQuietly(fileName: string): Promise<void> {
@@ -338,6 +388,8 @@ function toView(s: SoftwareWithRelations): SoftwareView {
         }
       : null,
     deploymentCount: s._count.deployments,
+    msiProductCode: s.msiProductCode,
+    uninstallAvailable: s.installType === InstallType.MSI && s.msiProductCode !== null,
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
     createdBy: s.createdBy,

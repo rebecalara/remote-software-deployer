@@ -5,15 +5,24 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { DeploymentStatus, InstallType, LogLevel, Prisma } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus, InstallType, LogLevel, Prisma } from '@prisma/client';
 import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
+import { SoftwareService } from '../software/software.service';
 import { DeploymentRunner } from './deployment-runner';
 import { DeploymentCreateInput, DeploymentListQuery } from './deployment-validation';
 import { PowerShellExecutor } from './powershell-executor';
 
 export const SUMMARY_WINDOW_HOURS = 24;
+
+/** Por que um EXE não tem desinstalação (409; a tela mostra o mesmo texto). */
+export const EXE_UNINSTALL_UNAVAILABLE =
+  'A desinstalação remota está disponível só para MSI: um EXE não traz um código de produto confiável, ' +
+  'e cada família de instalador desinstala de um jeito.';
+export const MISSING_PRODUCT_CODE =
+  'Não foi possível obter o ProductCode deste MSI, necessário para desinstalar. Envie o instalador de novo ' +
+  'ou confira o log do servidor.';
 
 /** GET /deployments/summary — contadores do painel de Monitoramento. */
 export interface DeploymentOverview {
@@ -58,6 +67,8 @@ export interface DeploymentCounts {
 interface DeploymentBase {
   id: string;
   name: string;
+  /** Instalação ou desinstalação. */
+  action: DeploymentAction;
   status: DeploymentStatus;
   createdAt: string;
   startedAt: string | null;
@@ -109,6 +120,7 @@ export class DeploymentsService {
     private readonly executor: PowerShellExecutor,
     private readonly storage: InstallerStorageService,
     private readonly runner: DeploymentRunner,
+    private readonly softwareService?: SoftwareService,
   ) {}
 
   /**
@@ -124,19 +136,30 @@ export class DeploymentsService {
 
     const software = await this.prisma.software.findUnique({ where: { id: input.softwareId } });
     if (!software) throw new NotFoundException('Software não encontrado.');
-    if (!software.active) {
-      throw new ConflictException('Este software está desativado e não pode ser implantado.');
-    }
-    if (!software.installerFileName) {
-      throw new ConflictException('Este software ainda não tem instalador enviado.');
-    }
-    if (!this.storage.isAvailable) {
-      throw new ServiceUnavailableException('Armazenamento de instaladores não configurado no servidor.');
-    }
-    if (!(await this.storage.exists(software.installerFileName))) {
-      throw new ConflictException(
-        'O arquivo do instalador deste software não foi encontrado na pasta de instaladores do servidor.',
-      );
+    const uninstall = input.action === DeploymentAction.UNINSTALL;
+
+    if (uninstall) {
+      // Desinstalação: só MSI e só o ProductCode — o instalador não é copiado, então não
+      // precisa estar na pasta. Software desativado PODE ser desinstalado (decisão da
+      // autora): desativar no catálogo costuma ser o momento de remover das máquinas.
+      if (software.installType !== InstallType.MSI) throw new ConflictException(EXE_UNINSTALL_UNAVAILABLE);
+      const code = software.msiProductCode ?? (await this.softwareService?.ensureMsiProductCode(software.id)) ?? null;
+      if (!code) throw new ConflictException(MISSING_PRODUCT_CODE);
+    } else {
+      if (!software.active) {
+        throw new ConflictException('Este software está desativado e não pode ser implantado.');
+      }
+      if (!software.installerFileName) {
+        throw new ConflictException('Este software ainda não tem instalador enviado.');
+      }
+      if (!this.storage.isAvailable) {
+        throw new ServiceUnavailableException('Armazenamento de instaladores não configurado no servidor.');
+      }
+      if (!(await this.storage.exists(software.installerFileName))) {
+        throw new ConflictException(
+          'O arquivo do instalador deste software não foi encontrado na pasta de instaladores do servidor.',
+        );
+      }
     }
 
     const [machines, aggregate] = await Promise.all([
@@ -162,11 +185,13 @@ export class DeploymentsService {
 
     const count = input.machineIds.length;
     const name =
-      input.name ?? `${software.name} ${software.version} — ${count} ${count === 1 ? 'máquina' : 'máquinas'}`;
+      input.name ??
+      `${uninstall ? 'Desinstalar ' : ''}${software.name} ${software.version} — ${count} ${count === 1 ? 'máquina' : 'máquinas'}`;
 
     const created = await this.prisma.deployment.create({
       data: {
         name,
+        action: input.action,
         user: { connect: { id: userId } },
         software: { connect: { id: software.id } },
         targets: { create: input.machineIds.map((machineId) => ({ machine: { connect: { id: machineId } } })) },
@@ -321,6 +346,7 @@ function toBase(d: DeploymentSummaryRow | DeploymentWithRelations): DeploymentBa
   return {
     id: d.id,
     name: d.name,
+    action: d.action,
     status: d.status,
     createdAt: d.createdAt.toISOString(),
     startedAt: d.startedAt?.toISOString() ?? null,
@@ -361,6 +387,7 @@ export function deploymentListWhere(query: DeploymentListQuery, requesterId: str
   if (query.state === 'finished' || query.finishedFrom) {
     where.finishedAt = { not: null, ...(query.finishedFrom ? { gte: query.finishedFrom } : {}) };
   }
+  if (query.action) where.action = query.action;
   if (query.status) where.status = query.status;
   if (query.softwareId) where.softwareId = query.softwareId;
   if (query.from || query.to) {

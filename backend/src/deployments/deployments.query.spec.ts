@@ -252,6 +252,10 @@ describe('deploymentListWhere (filtros do Histórico)', () => {
     });
   });
 
+  it('ação: instalação ou desinstalação', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({ action: 'UNINSTALL' }), ME)).toEqual({ action: 'UNINSTALL' });
+  });
+
   it('em andamento: sem data de encerramento', () => {
     expect(deploymentListWhere(parseDeploymentListQuery({ state: 'active' }), ME)).toEqual({ finishedAt: null });
   });

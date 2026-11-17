@@ -20,6 +20,7 @@ const USER_ID = 'user-1';
 const ID = '11111111-1111-4111-8111-111111111111';
 const OLD_FILE = 'c0ffee00-0000-4000-8000-000000000000.exe';
 const NEW_FILE = 'beef0000-0000-4000-8000-000000000000.exe';
+const PRODUCT_CODE = '{23170F69-40C1-2702-2606-000001000000}';
 
 /** Linha do banco como o Prisma devolve com o include do service. */
 function row(overrides: Record<string, unknown> = {}) {
@@ -71,8 +72,10 @@ describe('SoftwareService', () => {
     save: jest.Mock;
     delete: jest.Mock;
     listFiles: jest.Mock;
+    localPath: jest.Mock;
   };
   let service: SoftwareService;
+  let msiReader: { isAvailable: boolean; read: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -91,10 +94,13 @@ describe('SoftwareService', () => {
       save: jest.fn(),
       delete: jest.fn().mockResolvedValue(undefined),
       listFiles: jest.fn().mockResolvedValue([]),
+      localPath: jest.fn((name: string) => `C:\\rsd-data\\installers\\${name}`),
     };
+    msiReader = { isAvailable: true, read: jest.fn() };
     service = new SoftwareService(
       prisma as unknown as PrismaService,
       storage as unknown as InstallerStorageService,
+      msiReader as never,
     );
   });
 
@@ -429,8 +435,30 @@ describe('SoftwareService', () => {
 
     it('confere o cabeçalho contra o tipo cadastrado (MSI)', async () => {
       prisma.software.findUnique.mockResolvedValue(row({ installType: 'MSI', installArgs: [] }));
+      msiReader.read.mockResolvedValue({ ok: true, info: { productCode: PRODUCT_CODE } });
       await service.uploadInstaller(ID, body(), '7z.msi', USER_ID);
       expect(storage.save).toHaveBeenCalledWith(expect.any(Readable), 'MSI');
+    });
+
+    it('MSI: lê o ProductCode do arquivo guardado, no servidor, e grava junto com o instalador', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ installType: 'MSI', installArgs: [] }));
+      msiReader.read.mockResolvedValue({ ok: true, info: { productCode: PRODUCT_CODE } });
+      await service.uploadInstaller(ID, body(), '7z.msi', USER_ID);
+      expect(msiReader.read).toHaveBeenCalledWith(`C:\\rsd-data\\installers\\${NEW_FILE}`);
+      expect(prisma.software.updateMany.mock.calls[0][0].data).toMatchObject({ msiProductCode: PRODUCT_CODE });
+    });
+
+    it('MSI: se a leitura do ProductCode falhar, o envio vale assim mesmo (só sem desinstalação)', async () => {
+      prisma.software.findUnique.mockResolvedValue(row({ installType: 'MSI', installArgs: [] }));
+      msiReader.read.mockResolvedValue({ ok: false, message: 'COM indisponível' });
+      await service.uploadInstaller(ID, body(), '7z.msi', USER_ID);
+      expect(prisma.software.updateMany.mock.calls[0][0].data).toMatchObject({ msiProductCode: null });
+    });
+
+    it('EXE: não lê ProductCode (não existe para EXE)', async () => {
+      await service.uploadInstaller(ID, body(), '7z.exe', USER_ID);
+      expect(msiReader.read).not.toHaveBeenCalled();
+      expect(prisma.software.updateMany.mock.calls[0][0].data).toMatchObject({ msiProductCode: null });
     });
 
     it('troca: só atualiza se o registro ainda aponta para o arquivo antigo, e então apaga o antigo', async () => {

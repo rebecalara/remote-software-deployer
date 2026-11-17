@@ -34,6 +34,12 @@ enum InstallType {
   EXE
 }
 
+/// O que a implantação faz nas máquinas. Desinstalar só existe para MSI.
+enum DeploymentAction {
+  INSTALL
+  UNINSTALL
+}
+
 enum LogLevel {
   DEBUG
   INFO
@@ -83,6 +89,10 @@ model Software {
   installerSizeBytes    Int? // Int (não BigInt): limite de envio travado em 2000 MB
   installerSha256       String? // calculado no envio
   installerUploadedAt   DateTime?
+  /// ProductCode do MSI ({GUID}), lido pelo servidor do próprio pacote no envio
+  /// (scripts/read-msi-info.ps1). Nulo para EXE ou se a leitura falhar. É o que a
+  /// desinstalação usa — o instalador não precisa ser copiado para a máquina.
+  msiProductCode        String?
 
   // Auditoria (RN06 / RNF09): quem cadastrou e quem alterou por último.
   createdById String?
@@ -105,6 +115,7 @@ model Deployment {
   userId     String
   softwareId String
   status     DeploymentStatus @default(PENDING)
+  action     DeploymentAction @default(INSTALL)
   createdAt  DateTime         @default(now())
   startedAt  DateTime?
   finishedAt DateTime?

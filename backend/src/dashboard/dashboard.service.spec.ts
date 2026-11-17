@@ -110,6 +110,7 @@ describe('DashboardService.overview', () => {
     prisma.deployment.findMany.mockResolvedValue([
       {
         id: 'd1',
+        action: 'INSTALL',
         status: 'FAILED',
         finishedAt: t('2026-11-14T11:00:00Z'),
         software: { name: '7-Zip', version: '26.06' },
@@ -129,6 +130,7 @@ describe('DashboardService.overview', () => {
         at: '2026-11-14T11:00:00.000Z',
         by: 'testuser',
         deploymentId: 'd1',
+        action: 'INSTALL',
         status: 'FAILED',
         succeeded: 1,
         failed: 1,

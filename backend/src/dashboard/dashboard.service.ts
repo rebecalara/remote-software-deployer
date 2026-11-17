@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DeploymentStatus } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus } from '@prisma/client';
 import { DeploymentsService, type DeploymentOverview } from '../deployments/deployments.service';
 import { PowerShellExecutor } from '../deployments/powershell-executor';
 import { LdapAuthenticationError, LdapService } from '../ldap/ldap.service';
@@ -19,6 +19,8 @@ export interface ActivityItem {
   by: string | null;
   /** deployment: status final e contagem; software: tipo do instalador. */
   deploymentId?: string;
+  /** deployment: instalação ou desinstalação. */
+  action?: DeploymentAction;
   status?: DeploymentStatus;
   succeeded?: number;
   failed?: number;
@@ -150,6 +152,7 @@ export class DashboardService {
         at: d.finishedAt!.toISOString(),
         by: d.user.displayName || d.user.username,
         deploymentId: d.id,
+        action: d.action,
         status: d.status,
         succeeded: d.targets.filter((t) => t.status === DeploymentStatus.SUCCEEDED).length,
         failed: d.targets.filter((t) => t.status === DeploymentStatus.FAILED).length,

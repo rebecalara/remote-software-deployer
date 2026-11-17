@@ -64,6 +64,7 @@ describe('DeploymentRunner', () => {
 
     expect(run).toHaveBeenCalledWith(
       {
+        action: 'INSTALL',
         targetId: 't1',
         computerName: 'WS-001',
         installerPath: `C:\\rsd-data\\installers\\${FILE}`,
