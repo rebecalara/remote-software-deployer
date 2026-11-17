@@ -1,4 +1,4 @@
-import type { DeploymentCounts, DeploymentStatus } from '../../types/deployment';
+import type { DeploymentAction, DeploymentCounts, DeploymentStatus } from '../../types/deployment';
 
 // Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
 // pelo Histórico.
@@ -94,6 +94,24 @@ export function durationText(startIso: string | null, endIso: string | null, now
   const end = endIso ? new Date(endIso).getTime() : running ? now : null;
   return end === null ? '—' : formatDuration(end - new Date(startIso).getTime());
 }
+
+/** Selo "Instalação" / "Desinstalação" (Monitoramento, Histórico, Dashboard). */
+export function ActionBadge({ action }: { action: DeploymentAction }) {
+  return action === 'UNINSTALL' ? (
+    <span className="inline-flex rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-violet-700">
+      Desinstalação
+    </span>
+  ) : (
+    <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-slate-600">
+      Instalação
+    </span>
+  );
+}
+
+/** Por que um EXE não tem desinstalação — mesmo texto do 409 do backend. */
+export const EXE_UNINSTALL_UNAVAILABLE =
+  'A desinstalação remota está disponível só para MSI: um EXE não traz um código de produto confiável, ' +
+  'e cada família de instalador desinstala de um jeito.';
 
 /**
  * Alternador "Todas / Minhas implantações" (Histórico e Monitoramento). "Minhas" vira

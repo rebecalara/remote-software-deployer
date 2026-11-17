@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef } from 'react';
 import type { Deployment, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime } from '../../utils/format';
 import { DeploymentPanel } from './DeploymentPanel';
-import { StatusBadge, countsText, durationText } from './deploymentUi';
+import { ActionBadge, StatusBadge, countsText, durationText } from './deploymentUi';
 
 // Lista de implantações do Monitoramento e do Histórico. Cada linha expande ali mesmo
 // (acordeão) e mostra o DeploymentPanel: máquinas, fases, logs e "Cancelar pendentes".
@@ -77,7 +77,10 @@ export function DeploymentTable({
                     </button>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-slate-900">{d.name}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
+                      <span>{d.name}</span>
+                      <ActionBadge action={d.action} />
+                    </p>
                     <p className="text-xs text-slate-500">
                       {d.software.name} <span className="font-mono">{d.software.version}</span>
                     </p>

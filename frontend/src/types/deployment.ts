@@ -2,6 +2,8 @@
 import type { InstallType } from './software';
 
 export type DeploymentStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+/** Instalar ou desinstalar (desinstalar só existe para MSI). */
+export type DeploymentAction = 'INSTALL' | 'UNINSTALL';
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 export interface DeploymentLog {
@@ -35,6 +37,7 @@ export interface DeploymentCounts {
 export interface DeploymentSummary {
   id: string;
   name: string;
+  action: DeploymentAction;
   status: DeploymentStatus;
   createdAt: string;
   startedAt: string | null;
@@ -49,6 +52,8 @@ export interface Deployment extends DeploymentSummary {
 }
 
 export interface DeploymentCreateInput {
+  /** Ausente = INSTALL. */
+  action?: DeploymentAction;
   softwareId: string;
   machineIds: string[];
   name?: string;
@@ -92,6 +97,7 @@ export interface DeploymentListFilters {
   state?: 'active' | 'finished';
   /** Encerradas a partir deste instante (ISO 8601). */
   finishedFrom?: string;
+  action?: DeploymentAction;
 }
 
 /** GET /dashboard — resumo da tela inicial (espelha backend/src/dashboard/dashboard.service.ts). */
@@ -100,6 +106,7 @@ export interface DashboardActivity {
   at: string;
   by: string | null;
   deploymentId?: string;
+  action?: DeploymentAction;
   status?: DeploymentStatus;
   succeeded?: number;
   failed?: number;

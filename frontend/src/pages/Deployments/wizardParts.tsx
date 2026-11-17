@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 export const STEPS: Array<{ label: string }> = [
   { label: 'Selecionar máquinas' },
   { label: 'Selecionar software' },
-  { label: 'Revisar instalação' },
+  { label: 'Revisar' },
   { label: 'Executar' },
 ];
 

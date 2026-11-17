@@ -29,6 +29,10 @@ export interface Software {
   installer: InstallerInfo | null;
   /** Contagem real de implantações (0 até o Bloco 4). */
   deploymentCount: number;
+  /** ProductCode do MSI, lido pelo servidor do pacote no envio. null para EXE. */
+  msiProductCode: string | null;
+  /** Desinstalação remota possível: só MSI com ProductCode conhecido. */
+  uninstallAvailable: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: UserRef | null;

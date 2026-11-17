@@ -7,7 +7,7 @@ import { SessionExpiredError } from '../../services/apiClient';
 import { getDashboard, listDeployments } from '../../services/deploymentService';
 import type { DashboardActivity, DashboardData, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime, formatRelative } from '../../utils/format';
-import { Counter, StatusBadge } from '../Deployments/deploymentUi';
+import { ActionBadge, Counter, StatusBadge } from '../Deployments/deploymentUi';
 
 // Dashboard (tela inicial): resumo SÓ com dado real, a partir do mockup do Portfólio
 // (recorte no DECISIONS.md). Monitoramento e Histórico são telas separadas.
@@ -206,6 +206,7 @@ export function DashboardPage() {
               <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
                 <tr>
                   <th scope="col" className="px-4 py-3">Software</th>
+                  <th scope="col" className="px-4 py-3">Ação</th>
                   <th scope="col" className="px-4 py-3">Versão</th>
                   <th scope="col" className="px-4 py-3">Máquinas</th>
                   <th scope="col" className="px-4 py-3">Sucesso / falha</th>
@@ -220,6 +221,9 @@ export function DashboardPage() {
                       <Link to={`/deployments/${d.id}`} className="font-medium text-slate-900 hover:text-blue-700 hover:underline">
                         {d.software.name}
                       </Link>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <ActionBadge action={d.action} />
                     </td>
                     <td className="px-4 py-2.5 font-mono text-[13px] text-slate-600">{d.software.version}</td>
                     <td className="px-4 py-2.5 text-slate-600">{d.counts.total}</td>
@@ -269,6 +273,12 @@ function activityText(a: DashboardActivity): { text: string; dot: keyof typeof D
   if (a.kind === 'software') return { text: `${sw} adicionado ao catálogo`, dot: 'blue' };
   const total = a.total ?? 0;
   const machines = `${total} ${total === 1 ? 'máquina' : 'máquinas'}`;
+  if (a.action === 'UNINSTALL') {
+    if (a.status === 'SUCCEEDED') return { text: `${sw} removido de ${machines}`, dot: 'green' };
+    if (a.status === 'CANCELLED') return { text: `Desinstalação de ${sw} cancelada`, dot: 'slate' };
+    if ((a.succeeded ?? 0) > 0) return { text: `Desinstalação de ${sw}: ${a.failed} de ${machines} com falha`, dot: 'amber' };
+    return { text: `Falha ao desinstalar ${sw} em ${machines}`, dot: 'red' };
+  }
   if (a.status === 'SUCCEEDED') return { text: `${sw} instalado em ${machines}`, dot: 'green' };
   if (a.status === 'CANCELLED') return { text: `Implantação de ${sw} cancelada`, dot: 'slate' };
   if ((a.succeeded ?? 0) > 0) return { text: `${sw}: ${a.failed} de ${machines} com falha`, dot: 'amber' };

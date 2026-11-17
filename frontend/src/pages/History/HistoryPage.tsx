@@ -4,7 +4,7 @@ import { SearchIcon } from '../../components/icons';
 import { ApiError, SessionExpiredError } from '../../services/apiClient';
 import { getDeployment, listDeployments } from '../../services/deploymentService';
 import { listSoftware } from '../../services/softwareService';
-import type { Deployment, DeploymentListFilters, DeploymentPage, DeploymentStatus } from '../../types/deployment';
+import type { Deployment, DeploymentAction, DeploymentListFilters, DeploymentPage, DeploymentStatus } from '../../types/deployment';
 import type { Software } from '../../types/software';
 import { useNow } from '../../hooks/useNow';
 import { DeploymentTable, toggleInSet } from '../Deployments/DeploymentTable';
@@ -12,7 +12,7 @@ import { MineToggle, STATUS_LABEL } from '../Deployments/deploymentUi';
 
 // Histórico (Bloco 6, RF07/RF13): só implantações ENCERRADAS (as em andamento ficam no
 // Monitoramento), com filtros e paginação. Os filtros ficam na URL
-// (?mine=&from=&to=&status=&softwareId=&machine=&page=&open=): voltar no navegador ou
+// (?mine=&action=&from=&to=&status=&softwareId=&machine=&page=&open=): voltar no navegador ou
 // copiar o link preserva a busca. Cada implantação expande na própria linha, com as
 // máquinas e o log de cada uma (RF13); ?open=<id> abre e destaca uma.
 const PAGE_SIZE = 20;
@@ -41,6 +41,7 @@ export function HistoryPage() {
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const status = (params.get('status') ?? '') as DeploymentStatus | '';
+  const action = (params.get('action') ?? '') as DeploymentAction | '';
   const softwareId = params.get('softwareId') ?? '';
   const machine = params.get('machine') ?? '';
   const page = Math.max(1, Number(params.get('page')) || 1);
@@ -122,6 +123,7 @@ export function HistoryPage() {
       page,
       pageSize: PAGE_SIZE,
       state: 'finished',
+      action: action || undefined,
       status: status || undefined,
       softwareId: softwareId || undefined,
       machine: machine || undefined,
@@ -129,7 +131,7 @@ export function HistoryPage() {
       to: to ? endOfDayIso(to) : undefined,
       mine: mine || undefined,
     }),
-    [page, status, softwareId, machine, from, to, mine],
+    [page, status, softwareId, machine, from, to, mine, action],
   );
 
   useEffect(() => {
@@ -152,7 +154,7 @@ export function HistoryPage() {
     };
   }, [filters, periodInvalid]);
 
-  const filtersActive = mine || from || to || status || softwareId || machine;
+  const filtersActive = mine || action || from || to || status || softwareId || machine;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const firstItem = data && data.total > 0 ? (data.page - 1) * data.pageSize + 1 : 0;
   const lastItem = data ? Math.min(data.page * data.pageSize, data.total) : 0;
@@ -171,6 +173,14 @@ export function HistoryPage() {
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
           Até
           <input type="date" value={to} min={from || undefined} onChange={(e) => update({ to: e.target.value })} className={input} aria-label="Criadas até" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
+          Ação
+          <select value={action} onChange={(e) => update({ action: e.target.value })} className={input} aria-label="Ação">
+            <option value="">Todas</option>
+            <option value="INSTALL">Instalação</option>
+            <option value="UNINSTALL">Desinstalação</option>
+          </select>
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-slate-600">
           Status

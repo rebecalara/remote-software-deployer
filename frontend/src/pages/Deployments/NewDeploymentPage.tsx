@@ -7,12 +7,12 @@ import { SessionExpiredError } from '../../services/apiClient';
 import { createDeployment } from '../../services/deploymentService';
 import { listMachines } from '../../services/machineService';
 import { listSoftware } from '../../services/softwareService';
-import { MAX_TARGETS_PER_DEPLOYMENT, type Deployment } from '../../types/deployment';
+import { MAX_TARGETS_PER_DEPLOYMENT, type Deployment, type DeploymentAction } from '../../types/deployment';
 import type { Machine } from '../../types/machine';
 import type { Software } from '../../types/software';
 import { MachineStep } from './MachineStep';
 import { ConfirmStep, ReviewStep } from './ReviewStep';
-import { SoftwareStep } from './SoftwareStep';
+import { SoftwareStep, unavailableReason } from './SoftwareStep';
 import { Stepper, plural } from './wizardParts';
 
 /** A tela de Máquinas abre esta com as máquinas já marcadas (state da navegação). */
@@ -46,6 +46,7 @@ export function NewDeploymentPage() {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set((location.state as NewDeploymentLocationState | null)?.machineIds ?? []),
   );
+  const [action, setAction] = useState<DeploymentAction>('INSTALL');
   const [softwareId, setSoftwareId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -67,7 +68,8 @@ export function NewDeploymentPage() {
 
   const loadSoftware = useCallback(async () => {
     try {
-      setSoftware(await listSoftware());
+      // Inclui os desativados: a desinstalação aceita (o passo 2 os esconde ao instalar).
+      setSoftware(await listSoftware(true));
       setSoftwareError(null);
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setSoftwareError(messageOf(err));
@@ -96,15 +98,21 @@ export function NewDeploymentPage() {
     step === MACHINES
       ? selected.size > 0 && !overLimit
       : step === SOFTWARE
-        ? chosen !== null && chosen.installer !== null
+        ? chosen !== null && unavailableReason(chosen, action) === null && (action === 'UNINSTALL' || chosen.active)
         : true;
+
+  function changeAction(next: DeploymentAction) {
+    setAction(next);
+    // O software escolhido pode não valer para a outra ação (ex.: EXE ao desinstalar).
+    if (chosen && (unavailableReason(chosen, next) !== null || (next === 'INSTALL' && !chosen.active))) setSoftwareId(null);
+  }
 
   async function start() {
     if (!chosen || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      setCreated(await createDeployment({ softwareId: chosen.id, machineIds: selectedMachines.map((m) => m.id) }));
+      setCreated(await createDeployment({ action, softwareId: chosen.id, machineIds: selectedMachines.map((m) => m.id) }));
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setSubmitError(messageOf(err));
     } finally {
@@ -116,6 +124,7 @@ export function NewDeploymentPage() {
     setCreated(null);
     setSelected(new Set());
     setSoftwareId(null);
+    setAction('INSTALL');
     setSubmitError(null);
     setStep(MACHINES);
     navigate(location.pathname, { replace: true, state: null });
@@ -168,6 +177,7 @@ export function NewDeploymentPage() {
   } else if (step === SOFTWARE) {
     summary = chosen ? (
       <span className="font-semibold text-slate-900">
+        {action === 'UNINSTALL' && 'Desinstalar '}
         {chosen.name} <span className="font-mono font-normal">{chosen.version}</span>
         <span className="font-normal text-slate-500"> · {plural(selected.size, 'máquina', 'máquinas')}</span>
       </span>
@@ -177,6 +187,7 @@ export function NewDeploymentPage() {
   } else {
     summary = (
       <span className="font-semibold text-slate-900">
+        {action === 'UNINSTALL' && 'Desinstalar '}
         {chosen?.name} <span className="font-mono font-normal">{chosen?.version}</span> →{' '}
         {plural(selectedMachines.length, 'máquina', 'máquinas')}
       </span>
@@ -203,13 +214,15 @@ export function NewDeploymentPage() {
             software={software}
             loadError={softwareError}
             onRetry={loadSoftware}
+            action={action}
+            onActionChange={changeAction}
             selectedId={softwareId}
             onSelect={setSoftwareId}
           />
         )}
-        {step === REVIEW && chosen && <ReviewStep machines={selectedMachines} software={chosen} />}
+        {step === REVIEW && chosen && <ReviewStep machines={selectedMachines} software={chosen} action={action} />}
         {step === EXECUTE && chosen && (
-          <ConfirmStep machineCount={selectedMachines.length} software={chosen} error={submitError} />
+          <ConfirmStep machineCount={selectedMachines.length} software={chosen} action={action} error={submitError} />
         )}
       </div>
 
@@ -260,7 +273,7 @@ export function NewDeploymentPage() {
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <PlayIcon className="h-4 w-4" />
-              {submitting ? 'Iniciando…' : 'Iniciar implantação'}
+              {submitting ? 'Iniciando…' : action === 'UNINSTALL' ? 'Iniciar desinstalação' : 'Iniciar implantação'}
             </button>
           )}
         </div>
@@ -271,12 +284,13 @@ export function NewDeploymentPage() {
 
 function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRestart: () => void }) {
   const count = deployment.targets.length;
+  const uninstall = deployment.action === 'UNINSTALL';
   return (
     <section className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
-      <h2 className="text-xl font-semibold text-slate-900">Implantação iniciada</h2>
+      <h2 className="text-xl font-semibold text-slate-900">{uninstall ? 'Desinstalação iniciada' : 'Implantação iniciada'}</h2>
       <p className="mt-1 text-sm text-slate-500">
-        A instalação foi enfileirada para <strong>{plural(count, 'máquina', 'máquinas')}</strong> e segue em segundo
-        plano.
+        A {uninstall ? 'desinstalação' : 'instalação'} foi enfileirada para{' '}
+        <strong>{plural(count, 'máquina', 'máquinas')}</strong> e segue em segundo plano.
       </p>
       <p className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
         <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-600" />

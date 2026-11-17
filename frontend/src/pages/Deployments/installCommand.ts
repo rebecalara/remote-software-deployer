@@ -24,3 +24,11 @@ export function commandParts(software: Pick<Software, 'installType' | 'installAr
 export function commandText(software: Pick<Software, 'installType' | 'installArgs'>): string {
   return commandParts(software).join(' ');
 }
+
+/**
+ * Desinstalação (só MSI): comando fixo, sem nenhum argumento do catálogo; o ProductCode
+ * foi lido pelo servidor do próprio pacote. REBOOT=ReallySuppress por último.
+ */
+export function uninstallCommandText(software: Pick<Software, 'msiProductCode'>): string {
+  return ['msiexec.exe', '/x', software.msiProductCode ?? '{ProductCode}', '/qn', '/norestart', 'REBOOT=ReallySuppress'].join(' ');
+}

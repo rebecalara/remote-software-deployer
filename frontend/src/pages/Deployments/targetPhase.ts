@@ -15,6 +15,7 @@ export interface Phase {
 
 const RUNNING_PHASES: Array<[prefix: string, label: string]> = [
   ['Iniciando a instalação', 'Iniciando'],
+  ['Iniciando a desinstalação', 'Iniciando'],
   ['Conectando a', 'Conectando'],
   ['Sessão WinRM aberta', 'Conectando'],
   ['Copiando o instalador', 'Copiando o instalador'],
@@ -23,6 +24,10 @@ const RUNNING_PHASES: Array<[prefix: string, label: string]> = [
   ['Não foi possível conferir se o produto', 'Conferindo se já está instalado'],
   ['Executando o instalador', 'Instalando'],
   ['O instalador terminou', 'Finalizando'],
+  // Desinstalação (só MSI): nada é copiado.
+  ['Produto instalado na máquina', 'Conferindo se está instalado'],
+  ['Executando a desinstalação', 'Desinstalando'],
+  ['O desinstalador terminou', 'Finalizando'],
   ['Arquivos temporários apagados', 'Finalizando'],
   ['Não foi possível apagar', 'Finalizando'],
 ];
@@ -38,6 +43,7 @@ export function phaseOf(target: Pick<DeploymentTarget, 'status' | 'lastLog' | 'e
     }
     case 'SUCCEEDED':
       if (message.startsWith('Já instalado')) return { label: 'Já estava instalado', tone: 'success' };
+      if (message.startsWith('Não estava instalado')) return { label: 'Não estava instalado', tone: 'success' };
       if (target.exitCode === 3010 || target.exitCode === 1641) return { label: 'Concluído, reinício pendente', tone: 'warning' };
       return { label: 'Concluído', tone: 'success' };
     case 'FAILED':

@@ -430,6 +430,20 @@ function InstallerSection(props: InstallerSectionProps) {
             <span className="font-mono text-xs break-all">{installer.sha256}</span>
           </InfoRow>
           <InfoRow label="Enviado em">{formatDateTime(installer.uploadedAt)}</InfoRow>
+          {/* Desinstalação remota: só MSI, pelo ProductCode lido pelo servidor no envio. */}
+          <InfoRow label="Desinstalação">
+            {current?.installType === 'MSI' ? (
+              current.msiProductCode ? (
+                <span data-testid="product-code">
+                  Disponível · ProductCode <span className="font-mono text-xs break-all">{current.msiProductCode}</span>
+                </span>
+              ) : (
+                'Indisponível: o ProductCode deste MSI não foi lido. Envie o instalador de novo.'
+              )
+            ) : (
+              'Indisponível para EXE (só MSI).'
+            )}
+          </InfoRow>
         </dl>
       )}
 
