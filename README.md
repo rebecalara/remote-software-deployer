@@ -50,6 +50,9 @@ flowchart LR
   3. verifica se o produto já está instalado;
   4. executa em modo silencioso;
   5. apaga os arquivos temporários.
+
+  Na **desinstalação** (só MSI), o mesmo script confere se o produto está instalado e
+  executa `msiexec /x {ProductCode}`, sem copiar nada.
 - Para alcançar as estações pelo WinRM, **o backend precisa rodar em Windows, dentro da
   rede das estações.**
 
@@ -78,14 +81,32 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 | RF03 | Selecionar máquinas | ✅ Seleção individual e "selecionar todas" respeitando a busca. Até 50 máquinas por implantação. |
 | RF04 | Cadastrar softwares | ✅ Catálogo com MSI e EXE e argumentos silenciosos. O instalador é enviado ao sistema, que calcula o SHA-256. Desativar em vez de apagar o que já foi implantado. |
 | RF05 | Executar instalação remota | ✅ Fila com até 10 máquinas em paralelo e uma instalação por vez em cada máquina. Validado numa VM de laboratório (ver [Limitações](#limitações-conhecidas)). |
-| RF06 | Acompanhar status | ✅ Tela de acompanhamento com a fase de cada máquina (conectando, copiando, conferindo o hash, instalando…), atualizada a cada 3 s, e painel de Monitoramento. |
-| RF07 | Histórico de instalações | ✅ Filtros por período, status, software, máquina e "Minhas implantações", com paginação. Os filtros ficam no link. |
+| RF06 | Acompanhar status | ✅ Monitoramento com as implantações em andamento e as encerradas nas últimas 24 h. Cada uma expande na própria linha, com a fase de cada máquina (conectando, copiando, conferindo o hash, instalando…), atualizada a cada 3 s. |
+| RF07 | Histórico de instalações | ✅ Implantações encerradas, com filtros por período, ação, status, software, máquina e "Minhas implantações", e paginação. Os filtros ficam no link. |
 | RF08 | Inventário de software instalado por máquina | ⏳ **Trabalho futuro.** Depende de consulta ao vivo pelo WinRM, já validada na prova de conceito, mas não implementada. |
 | RF09 | Registrar resultado | ✅ Status e código de saída por máquina. Os códigos do Windows Installer (1603, 1618…) aparecem com mensagem explicativa. |
 | RF10 | Mensagens de sucesso e falha | ✅ Cada falha diz a fase e o motivo (máquina não encontrada, WinRM recusado, acesso negado, hash diferente, tempo esgotado…). |
 | RF11 | Pesquisar e filtrar máquinas | ✅ Busca por nome, sistema ou setor; filtro por setor e por presença no AD. |
 | RF12 | Detalhes da máquina | ✅ Painel com os dados vindos do AD. IP, CPU e memória não são mostrados porque o AD não os fornece. |
-| RF13 | Logs de execução | ✅ Log completo de cada máquina, com hora e nível, na tela de acompanhamento. |
+| RF13 | Logs de execução | ✅ Log completo de cada máquina, com hora e nível, dentro da implantação expandida no Monitoramento e no Histórico. |
+
+### Acréscimo fora do RFC: desinstalação remota (só MSI)
+
+Na Nova Instalação, o passo do software tem a escolha **Instalar / Desinstalar**.
+
+- **Como funciona:** a desinstalação usa o mesmo fluxo da instalação (fila, uma ação
+  por vez em cada máquina, logs, Monitoramento, Histórico e permissões). Na máquina, o
+  comando é sempre `msiexec.exe /x {ProductCode} /qn /norestart REBOOT=ReallySuppress`.
+  - O **ProductCode** é lido pelo servidor do próprio pacote MSI, no envio, com o pacote
+    aberto só para leitura. Por isso **nada é copiado** para a máquina.
+  - Nenhum argumento do catálogo é repassado.
+- **Produto ausente:** se o produto não estiver instalado na máquina, nada é executado e
+  a máquina fica como sucesso, com o aviso "não estava instalado". O mesmo vale para o
+  código 1605. Os códigos 0, 3010 e 1641 têm o mesmo tratamento da instalação.
+- **Software desativado** no catálogo pode ser desinstalado; instalar continua exigindo
+  software ativo.
+- **EXE não tem desinstalação:** um EXE não traz um código de produto confiável, e cada
+  família de instalador desinstala de um jeito. A tela explica isso no próprio passo.
 
 ## Telas
 
@@ -93,14 +114,13 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 |---|---|
 | **Login** com a conta de rede<br/>![Login](docs/img/01-login.png) | **Máquinas** sincronizadas com o AD, com o painel de detalhes<br/>![Máquinas](docs/img/03-maquinas.png) |
 | **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Instalação**, revisão com o comando exato que será executado<br/>![Nova Instalação](docs/img/05-nova-instalacao-revisao.png) |
-| **Acompanhamento** por máquina, com o log<br/>![Acompanhamento](docs/img/06-acompanhamento.png) | **Monitoramento** das implantações<br/>![Monitoramento](docs/img/07-monitoramento.png) |
-| **Histórico** com filtros<br/>![Histórico](docs/img/08-historico.png) | |
+| **Monitoramento**, com a implantação expandida na própria linha e o log da máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros, uma implantação parcial expandida<br/>![Histórico](docs/img/07-historico.png) |
+| **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | |
 
 Os prints foram feitos no ambiente de desenvolvimento, só com dados fictícios: as
 máquinas `WS-*` vêm do OpenLDAP local, e a `RSD-ALVO-01` é uma VM de laboratório. O
-acompanhamento mostra uma implantação real nessa VM. O produto já estava instalado, então
-o sistema não o executou de novo. A outra máquina, fictícia, falhou por não existir na
-rede.
+Monitoramento mostra uma desinstalação real nessa VM, e o Histórico, uma instalação em
+que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede.
 
 ## Decisões de segurança
 
@@ -117,8 +137,12 @@ rede.
     permitidos e passados como parâmetros (`Start-Process -ArgumentList`), nunca por
     `Invoke-Expression` ou `cmd /c`.
   - Não existe o tipo "script".
+  - Na desinstalação, o comando também é fixo (`msiexec /x {ProductCode}`): o
+    ProductCode é lido pelo servidor do pacote, com outro script fixo
+    ([`backend/scripts/read-msi-info.ps1`](backend/scripts/read-msi-info.ps1)) que abre
+    o MSI só para leitura. Nenhum argumento do catálogo é usado.
 - **O sistema nunca reinicia as máquinas.** O MSI roda com `/norestart`, e
-  `REBOOT=ReallySuppress` é sempre o último argumento. O catálogo recusa `REBOOT` com
+  `REBOOT=ReallySuppress` é sempre o último argumento, na instalação e na desinstalação. O catálogo recusa `REBOOT` com
   outro valor. Isso foi encontrado na prática: na VM de teste, um `REBOOT=Force` vindo
   do catálogo reiniciou a máquina antes dessa proteção existir.
 - **Hash conferido no destino.** O SHA-256 é calculado pelo servidor no envio do
@@ -276,6 +300,9 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   status só aparece quando a implantação tenta conectar.
 - **EXE sem verificação de "já instalado":** só o MSI traz um código de produto
   confiável. Um EXE implantado de novo é executado de novo.
+- **Desinstalação só para MSI, e por versão:** o ProductCode é o da versão cadastrada no
+  catálogo. Se a máquina tiver outra versão do produto, o resultado é "não estava
+  instalado"; para removê-la, cadastra-se o MSI dessa versão.
 - **Um EXE pode reiniciar a máquina por conta própria.** O sistema controla o reinício
   do MSI, mas não o de um instalador EXE que o force internamente.
 - **Fila e agendamento em memória, num único processo.** Com mais de uma instância do
@@ -289,6 +316,8 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
 - **Inventário de software por máquina (RF08):** consulta ao vivo pelo WinRM
   (`Get-Package` mais leitura do registro, já validados na prova de conceito),
   reaproveitando a conexão da implantação.
+- **Desinstalação de EXE:** exigiria descobrir, por família de instalador (Inno Setup,
+  NSIS, InstallShield…), o desinstalador e os argumentos silenciosos de cada produto.
 - **Agente nas estações:** eliminaria a cópia pelo servidor, que limita a banda, e
   permitiria saber se a máquina está online.
 - **Status online/offline e dados de hardware** (IP, CPU, memória) por verificação sob
