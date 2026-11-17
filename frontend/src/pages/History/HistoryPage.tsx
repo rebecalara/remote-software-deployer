@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { SearchIcon } from '../../components/icons';
 import { ApiError, SessionExpiredError } from '../../services/apiClient';
-import { listDeployments } from '../../services/deploymentService';
+import { getDeployment, listDeployments } from '../../services/deploymentService';
 import { listSoftware } from '../../services/softwareService';
-import type { DeploymentListFilters, DeploymentPage, DeploymentStatus } from '../../types/deployment';
+import type { Deployment, DeploymentListFilters, DeploymentPage, DeploymentStatus } from '../../types/deployment';
 import type { Software } from '../../types/software';
-import { formatDateTime } from '../../utils/format';
-import { MineToggle, STATUS_LABEL, StatusBadge, countsText, durationText } from '../Deployments/deploymentUi';
+import { useNow } from '../../hooks/useNow';
+import { DeploymentTable, toggleInSet } from '../Deployments/DeploymentTable';
+import { MineToggle, STATUS_LABEL } from '../Deployments/deploymentUi';
 
-// Histórico (Bloco 6, RF07/RF13): implantações passadas com filtros e paginação. Os
-// filtros ficam na URL (?mine=&from=&to=&status=&softwareId=&machine=&page=): voltar no
-// navegador ou copiar o link preserva a busca. Abrir uma implantação leva ao
-// acompanhamento, que mostra os logs de cada máquina (RF13).
+// Histórico (Bloco 6, RF07/RF13): só implantações ENCERRADAS (as em andamento ficam no
+// Monitoramento), com filtros e paginação. Os filtros ficam na URL
+// (?mine=&from=&to=&status=&softwareId=&machine=&page=&open=): voltar no navegador ou
+// copiar o link preserva a busca. Cada implantação expande na própria linha, com as
+// máquinas e o log de cada uma (RF13); ?open=<id> abre e destaca uma.
 const PAGE_SIZE = 20;
-const STATUSES: DeploymentStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED', 'RUNNING', 'PENDING'];
+const STATUSES: DeploymentStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
 const MACHINE_DEBOUNCE_MS = 400;
 
 /** "2026-11-14" (dia escolhido, no fuso de quem usa) → instante ISO do início do dia. */
@@ -33,8 +35,9 @@ function messageOf(err: unknown): string {
 }
 
 export function HistoryPage() {
-  const navigate = useNavigate();
+  const now = useNow(1_000);
   const [params, setParams] = useSearchParams();
+  const openParam = params.get('open');
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const status = (params.get('status') ?? '') as DeploymentStatus | '';
@@ -48,6 +51,35 @@ export function HistoryPage() {
   const [data, setData] = useState<DeploymentPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(openParam ? [openParam] : []));
+  const [pinned, setPinned] = useState<Deployment | null>(null);
+
+  useEffect(() => {
+    if (openParam) setOpenIds((s) => (s.has(openParam) ? s : new Set(s).add(openParam)));
+  }, [openParam]);
+
+  // ?open de uma implantação fora da página atual (outros filtros, outra página):
+  // mostrada à parte, acima da lista, para o link nunca cair no vazio.
+  useEffect(() => {
+    if (!openParam || data === null) return;
+    if (data.items.some((d) => d.id === openParam)) {
+      setPinned(null);
+      return;
+    }
+    if (pinned?.id === openParam) return;
+    getDeployment(openParam)
+      .then((d) => setPinned(d.finishedAt ? d : null))
+      .catch(() => setPinned(null));
+  }, [openParam, data, pinned?.id]);
+
+  function toggle(id: string) {
+    setOpenIds((s) => toggleInSet(s, id));
+    if (id === openParam && openIds.has(id)) {
+      const next = new URLSearchParams(window.location.search);
+      next.delete('open');
+      setParams(next, { replace: true });
+    }
+  }
 
   /**
    * Muda um filtro e volta para a página 1 (a não ser que a mudança seja a própria
@@ -65,6 +97,7 @@ export function HistoryPage() {
       else next.delete(key);
     }
     if (!('page' in changes)) next.delete('page');
+    next.delete('open');
     setParams(next, { replace: !('page' in changes) });
   }
 
@@ -88,6 +121,7 @@ export function HistoryPage() {
     () => ({
       page,
       pageSize: PAGE_SIZE,
+      state: 'finished',
       status: status || undefined,
       softwareId: softwareId || undefined,
       machine: machine || undefined,
@@ -200,59 +234,31 @@ export function HistoryPage() {
         </p>
       )}
 
+      {pinned && (
+        <section className="space-y-2" data-testid="pinned-section">
+          <h2 className="text-sm font-semibold text-slate-700">Implantação aberta pelo link</h2>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <DeploymentTable items={[pinned]} ariaLabel="Implantação aberta pelo link" openIds={openIds} onToggle={toggle} highlightId={openParam} now={now} />
+          </div>
+        </section>
+      )}
+
       <div className={`overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm ${loading ? 'opacity-70' : ''}`}>
         {data === null ? (
           <p className="px-6 py-12 text-center text-sm text-slate-500">{error ? 'Sem dados.' : 'Carregando…'}</p>
         ) : data.items.length === 0 ? (
           <p className="px-6 py-12 text-center text-sm text-slate-500">
-            {filtersActive ? 'Nenhuma implantação encontrada com esses filtros.' : 'Nenhuma implantação registrada ainda.'}
+            {filtersActive ? 'Nenhuma implantação encontrada com esses filtros.' : 'Nenhuma implantação encerrada ainda.'}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
-                <tr>
-                  <th scope="col" className="px-4 py-3">Implantação</th>
-                  <th scope="col" className="px-4 py-3">Máquinas</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
-                  <th scope="col" className="px-4 py-3">Solicitada por</th>
-                  <th scope="col" className="px-4 py-3">Criada em</th>
-                  <th scope="col" className="px-4 py-3">Duração</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {data.items.map((d) => (
-                  <tr key={d.id} onClick={() => navigate(`/deployments/${d.id}`)} className="cursor-pointer hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <Link
-                        to={`/deployments/${d.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="font-medium text-slate-900 hover:text-blue-700 hover:underline"
-                      >
-                        {d.name}
-                      </Link>
-                      <p className="text-xs text-slate-500">
-                        {d.software.name} <span className="font-mono">{d.software.version}</span>
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{countsText(d.counts)}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={d.status} />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                      {d.requestedBy.displayName || d.requestedBy.username}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">
-                      {formatDateTime(d.createdAt)}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">
-                      {durationText(d.startedAt, d.finishedAt, Date.now(), d.finishedAt === null)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DeploymentTable
+            items={data.items}
+            ariaLabel="Implantações encerradas"
+            openIds={openIds}
+            onToggle={toggle}
+            highlightId={openParam}
+            now={now}
+          />
         )}
       </div>
 

@@ -38,6 +38,8 @@ export class DeploymentsController {
    * (?page=, ?pageSize= até 100) e com filtros (?status=, ?softwareId=, ?machine=,
    * ?from= e ?to= em ISO 8601). Filtro inválido = 400 com o campo.
    * ?mine=true traz só as criadas pelo usuário logado — o id sai do token, nunca da query.
+   * ?state=active|finished separa em andamento e encerradas; ?finishedFrom= (ISO 8601)
+   * limita as encerradas a partir de um instante (Monitoramento: últimas 24 h).
    */
   @Get()
   list(@Query() query: Record<string, unknown>, @Req() req: AuthenticatedRequest): Promise<DeploymentPage> {

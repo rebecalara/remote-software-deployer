@@ -84,6 +84,10 @@ export interface DeploymentListQuery {
    * controller o tira do token e o passa ao service à parte.
    */
   mine: boolean;
+  /** "active" = ainda não encerrada (finishedAt nulo); "finished" = encerrada. */
+  state: 'active' | 'finished' | null;
+  /** Encerrada a partir de (inclusive). Só faz sentido para as encerradas. */
+  finishedFrom: Date | null;
 }
 
 /**
@@ -132,6 +136,14 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
   const from = instant('from', 'Data inicial');
   const to = instant('to', 'Data final');
   if (from && to && from >= to) throw invalid('to', 'A data final deve ser depois da inicial.');
+  const state = text('state');
+  if (state !== null && state !== 'active' && state !== 'finished') {
+    throw invalid('state', 'Use state=active ou state=finished.');
+  }
+  const finishedFrom = instant('finishedFrom', 'Data de encerramento');
+  if (finishedFrom && state === 'active') {
+    throw invalid('finishedFrom', 'Implantações em andamento ainda não têm data de encerramento.');
+  }
   const mine = text('mine');
   if (mine !== null && mine !== 'true' && mine !== 'false') throw invalid('mine', 'Use mine=true ou mine=false.');
 
@@ -144,5 +156,7 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
     from,
     to,
     mine: mine === 'true',
+    state: state as 'active' | 'finished' | null,
+    finishedFrom,
   };
 }

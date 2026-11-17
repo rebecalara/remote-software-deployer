@@ -252,6 +252,17 @@ describe('deploymentListWhere (filtros do Histórico)', () => {
     });
   });
 
+  it('em andamento: sem data de encerramento', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({ state: 'active' }), ME)).toEqual({ finishedAt: null });
+  });
+
+  it('encerradas, opcionalmente a partir de um instante', () => {
+    expect(deploymentListWhere(parseDeploymentListQuery({ state: 'finished' }), ME)).toEqual({ finishedAt: { not: null } });
+    expect(
+      deploymentListWhere(parseDeploymentListQuery({ state: 'finished', finishedFrom: '2026-11-15T12:00:00Z' }), ME),
+    ).toEqual({ finishedAt: { not: null, gte: new Date('2026-11-15T12:00:00Z') } });
+  });
+
   it('só uma das datas', () => {
     expect(deploymentListWhere(parseDeploymentListQuery({ from: '2026-11-01T03:00:00Z' }), ME)).toEqual({
       createdAt: { gte: new Date('2026-11-01T03:00:00Z') },

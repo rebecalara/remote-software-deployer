@@ -88,6 +88,10 @@ export interface DeploymentListFilters {
   to?: string;
   /** Só as criadas pelo usuário logado (o backend identifica pelo token). */
   mine?: boolean;
+  /** "active" = ainda não encerrada; "finished" = encerrada. */
+  state?: 'active' | 'finished';
+  /** Encerradas a partir deste instante (ISO 8601). */
+  finishedFrom?: string;
 }
 
 /** GET /dashboard — resumo da tela inicial (espelha backend/src/dashboard/dashboard.service.ts). */

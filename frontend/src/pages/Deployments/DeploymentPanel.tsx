@@ -1,59 +1,77 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
 import { RefreshIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
-import { ApiError, SessionExpiredError } from '../../services/apiClient';
+import { SessionExpiredError } from '../../services/apiClient';
 import { cancelDeployment, getDeployment, getTargetLogs } from '../../services/deploymentService';
 import type { Deployment, DeploymentLog, DeploymentStatus, DeploymentTarget, LogLevel } from '../../types/deployment';
-import { formatDateTime } from '../../utils/format';
-import { Counter, LiveIndicator, StatusBadge, formatDuration, formatTime } from './deploymentUi';
+import { LiveIndicator, StatusBadge, formatDuration, formatTime } from './deploymentUi';
 import { phaseOf, type PhaseTone } from './targetPhase';
 import { plural } from './wizardParts';
 
-// Acompanhamento de UMA implantação (RF06), a partir do mockup de Monitoramento do
-// Portfólio. Polling simples (PLANNING §9, sem WebSocket): a cada 3 s enquanto houver
-// máquina pendente ou em execução. O painel geral com todas as implantações é do Bloco 5
-// e reaproveita esta tela.
+// Detalhe de UMA implantação (RF06/RF13), aberto na própria linha do Monitoramento e
+// do Histórico (acordeão): máquinas com fase, status, tempo, código de saída e o log de
+// cada uma, e "Cancelar pendentes". Polling simples (PLANNING §9, sem WebSocket): a cada
+// 3 s enquanto houver máquina pendente ou em execução.
 const POLL_MS = 3_000;
 
 type Filter = 'all' | 'active' | 'succeeded' | 'failed' | 'cancelled';
 
 const FINAL: DeploymentStatus[] = ['SUCCEEDED', 'FAILED', 'CANCELLED'];
 
+// Último estado lido de cada implantação. Quando a implantação passa de "em andamento"
+// para "encerradas" no Monitoramento, a linha muda de seção e o painel é montado de novo:
+// com o cache, ele reaparece já preenchido, sem piscar "Carregando…".
+// Pelo mesmo motivo, a aba e o log aberto de cada implantação também sobrevivem à troca.
+const lastSeen = new Map<string, Deployment>();
+const lastView = new Map<string, { filter: Filter; expanded: string | null }>();
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : 'Erro inesperado.';
 }
 
-export function DeploymentDetailsPage() {
-  const { id = '' } = useParams();
+export function DeploymentPanel({
+  deploymentId,
+  onUpdate,
+}: {
+  deploymentId: string;
+  /** Chamado a cada leitura: a lista usa para perceber o fim sem esperar o próprio polling. */
+  onUpdate?: (deployment: Deployment) => void;
+}) {
   const { user } = useAuth();
-  // ADMIN/OPERATOR: cancelar pendentes e o atalho para Nova instalação (VIEWER não vê).
   const canCancel = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
   const now = useNow(1_000);
 
-  const [deployment, setDeployment] = useState<Deployment | null>(null);
-  const [loadError, setLoadError] = useState<{ status: number | null; message: string } | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<number | null>(null);
-  const [filter, setFilter] = useState<Filter>('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [deployment, setDeployment] = useState<Deployment | null>(() => lastSeen.get(deploymentId) ?? null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>(() => lastView.get(deploymentId)?.filter ?? 'all');
+  const [expanded, setExpanded] = useState<string | null>(() => lastView.get(deploymentId)?.expanded ?? null);
+  useEffect(() => {
+    lastView.set(deploymentId, { filter, expanded });
+  }, [deploymentId, filter, expanded]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
 
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+
+  const apply = useCallback((d: Deployment) => {
+    lastSeen.set(d.id, d);
+    setDeployment(d);
+    onUpdateRef.current?.(d);
+  }, []);
+
   const load = useCallback(async () => {
     try {
-      setDeployment(await getDeployment(id));
+      apply(await getDeployment(deploymentId));
       setLoadError(null);
-      setLastUpdate(Date.now());
     } catch (err) {
-      if (err instanceof SessionExpiredError) return;
-      setLoadError({ status: err instanceof ApiError ? err.status : null, message: messageOf(err) });
+      if (!(err instanceof SessionExpiredError)) setLoadError(messageOf(err));
     }
-  }, [id]);
+  }, [deploymentId, apply]);
 
   useEffect(() => {
-    setDeployment(null);
     void load();
   }, [load]);
 
@@ -69,8 +87,8 @@ export function DeploymentDetailsPage() {
     setFeedback(null);
     try {
       const before = deployment?.counts.pending ?? 0;
-      const updated = await cancelDeployment(id);
-      setDeployment(updated);
+      const updated = await cancelDeployment(deploymentId);
+      apply(updated);
       const cancelled = before - updated.counts.pending;
       setFeedback({ kind: 'success', text: `${plural(cancelled, 'máquina pendente cancelada', 'máquinas pendentes canceladas')}.` });
     } catch (err) {
@@ -95,140 +113,20 @@ export function DeploymentDetailsPage() {
     [targets, filter],
   );
 
-  if (loadError && !deployment) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-          <p className="text-sm font-medium text-slate-700">
-            {loadError.status === 404 || loadError.status === 400
-              ? 'Implantação não encontrada.'
-              : 'Não foi possível carregar a implantação.'}
-          </p>
-          {loadError.status !== 404 && loadError.status !== 400 && (
-            <p className="mt-1 text-sm text-slate-500">{loadError.message}</p>
-          )}
-          <div className="mt-4 flex justify-center gap-4 text-sm font-medium">
-            {loadError.status !== 404 && loadError.status !== 400 && (
-              <button type="button" onClick={load} className="text-blue-700 hover:underline">
-                Tentar de novo
-              </button>
-            )}
-            {canCancel && (
-              <Link to="/deployments/new" className="text-blue-700 hover:underline">
-                Nova instalação
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   if (!deployment) {
-    return <p className="p-6 text-sm text-slate-500">Carregando implantação…</p>;
+    return (
+      <p className="px-2 py-4 text-sm text-slate-500">
+        {loadError ? `Não foi possível carregar a implantação: ${loadError}` : 'Carregando máquinas…'}
+      </p>
+    );
   }
 
   const c = deployment.counts;
   const active = c.pending + c.running;
 
   return (
-    <div className="space-y-4 p-4 sm:p-6">
-      {/* Cabeçalho: o que é, de quem, quando */}
-      <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-6">
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold text-slate-900">{deployment.name}</h2>
-              <StatusBadge status={deployment.status} />
-            </div>
-            <p className="mt-1 text-sm text-slate-500">
-              <span className="font-medium text-slate-700">{deployment.software.name}</span>{' '}
-              <span className="font-mono">{deployment.software.version}</span>
-              {' · '}
-              solicitada por {deployment.requestedBy.displayName || deployment.requestedBy.username}
-              {' · '}
-              {formatDateTime(deployment.createdAt)}
-              {deployment.finishedAt && <> · encerrada {formatDateTime(deployment.finishedAt)}</>}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {canCancel && c.pending > 0 && !confirmCancel && (
-              <button
-                type="button"
-                onClick={() => setConfirmCancel(true)}
-                className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
-              >
-                Cancelar pendentes ({c.pending})
-              </button>
-            )}
-            {canCancel && (
-              <Link
-                to="/deployments/new"
-                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Nova instalação
-              </Link>
-            )}
-          </div>
-        </div>
-
-        {confirmCancel && (
-          <div
-            role="alertdialog"
-            aria-label="Confirmar cancelamento"
-            className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
-          >
-            <span className="min-w-0 flex-1">
-              {c.pending === 1
-                ? 'Cancelar a máquina que ainda não começou?'
-                : `Cancelar as ${c.pending} máquinas que ainda não começaram?`}{' '}
-              As que estão em execução terminam normalmente.
-            </span>
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={cancelling}
-              className="rounded-lg bg-red-700 px-3 py-1.5 font-semibold text-white hover:bg-red-800 disabled:opacity-60"
-            >
-              {cancelling ? 'Cancelando…' : 'Cancelar pendentes'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmCancel(false)}
-              disabled={cancelling}
-              className="rounded-lg px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100"
-            >
-              Voltar
-            </button>
-          </div>
-        )}
-
-        {feedback && (
-          <p
-            role={feedback.kind === 'error' ? 'alert' : 'status'}
-            className={`mt-4 rounded-lg px-3 py-2 text-sm ${
-              feedback.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'
-            }`}
-          >
-            {feedback.text}
-          </p>
-        )}
-      </section>
-
-      {/* Contadores */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Counter label="Máquinas" value={c.total} />
-        <Counter label="Em andamento" value={active} tone="blue" detail={c.pending > 0 ? `${c.pending} na fila` : undefined} />
-        <Counter label="Concluídas" value={c.succeeded} tone="green" />
-        <Counter
-          label="Com falha"
-          value={c.failed}
-          tone="red"
-          detail={c.cancelled > 0 ? `${plural(c.cancelled, 'cancelada', 'canceladas')}` : undefined}
-        />
-      </div>
-
-      {/* Filtros + indicador de atualização */}
+    <div className="space-y-3" data-testid="deployment-panel">
+      {/* Abas por status + cancelar + indicador de atualização */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label="Filtrar máquinas" className="flex flex-wrap gap-1 border-b border-slate-200">
           <Tab active={filter === 'all'} onClick={() => setFilter('all')}>Todas ({c.total})</Tab>
@@ -239,13 +137,21 @@ export function DeploymentDetailsPage() {
             <Tab active={filter === 'cancelled'} onClick={() => setFilter('cancelled')}>Canceladas ({c.cancelled})</Tab>
           )}
         </div>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {canCancel && c.pending > 0 && !confirmCancel && (
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(true)}
+              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+            >
+              Cancelar pendentes ({c.pending})
+            </button>
+          )}
           <LiveIndicator live={!finished} idleText="Implantação encerrada" />
           <button
             type="button"
             onClick={load}
-            aria-label="Atualizar agora"
-            title={lastUpdate ? `Atualizado às ${new Date(lastUpdate).toLocaleTimeString('pt-BR')}` : 'Atualizar agora'}
+            aria-label="Atualizar esta implantação"
             className="rounded-md p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-700"
           >
             <RefreshIcon className="h-4 w-4" />
@@ -253,28 +159,69 @@ export function DeploymentDetailsPage() {
         </div>
       </div>
 
+      {confirmCancel && (
+        <div
+          role="alertdialog"
+          aria-label="Confirmar cancelamento"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+        >
+          <span className="min-w-0 flex-1">
+            {c.pending === 1
+              ? 'Cancelar a máquina que ainda não começou?'
+              : `Cancelar as ${c.pending} máquinas que ainda não começaram?`}{' '}
+            As que estão em execução terminam normalmente.
+          </span>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="rounded-lg bg-red-700 px-3 py-1.5 font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+          >
+            {cancelling ? 'Cancelando…' : 'Cancelar pendentes'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmCancel(false)}
+            disabled={cancelling}
+            className="rounded-lg px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100"
+          >
+            Voltar
+          </button>
+        </div>
+      )}
+
+      {feedback && (
+        <p
+          role={feedback.kind === 'error' ? 'alert' : 'status'}
+          className={`rounded-lg px-3 py-2 text-sm ${
+            feedback.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'
+          }`}
+        >
+          {feedback.text}
+        </p>
+      )}
       {loadError && (
         <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Falha ao atualizar ({loadError.message}). Tentando de novo a cada 3 s.
+          Falha ao atualizar ({loadError}). Tentando de novo a cada 3 s.
         </p>
       )}
 
       {/* Máquinas */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         {visible.length === 0 ? (
-          <p className="px-6 py-12 text-center text-sm text-slate-500">Nenhuma máquina neste filtro.</p>
+          <p className="px-6 py-8 text-center text-sm text-slate-500">Nenhuma máquina neste filtro.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
                 <tr>
-                  <th scope="col" className="w-10 px-3 py-3" aria-label="Expandir log" />
-                  <th scope="col" className="px-4 py-3">Máquina</th>
-                  <th scope="col" className="px-4 py-3">Fase</th>
-                  <th scope="col" className="px-4 py-3">Status</th>
-                  <th scope="col" className="px-4 py-3">Início</th>
-                  <th scope="col" className="px-4 py-3">Tempo decorrido</th>
-                  <th scope="col" className="px-4 py-3">Código de saída</th>
+                  <th scope="col" className="w-10 px-3 py-2.5" aria-label="Expandir log" />
+                  <th scope="col" className="px-4 py-2.5">Máquina</th>
+                  <th scope="col" className="px-4 py-2.5">Fase</th>
+                  <th scope="col" className="px-4 py-2.5">Status</th>
+                  <th scope="col" className="px-4 py-2.5">Início</th>
+                  <th scope="col" className="px-4 py-2.5">Tempo decorrido</th>
+                  <th scope="col" className="px-4 py-2.5">Código de saída</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -327,8 +274,8 @@ function TargetRow({
 
   return (
     <>
-      <tr onClick={onToggle} className={`cursor-pointer ${open ? 'bg-slate-50' : 'hover:bg-slate-50'}`}>
-        <td className="px-3 py-3 text-slate-400">
+      <tr onClick={onToggle} className={`cursor-pointer ${open ? 'bg-slate-50' : 'hover:bg-slate-50'}`} data-machine={t.hostname}>
+        <td className="px-3 py-2.5 text-slate-400">
           <button
             type="button"
             aria-expanded={open}
@@ -344,18 +291,18 @@ function TargetRow({
             </span>
           </button>
         </td>
-        <td className="px-4 py-3 font-mono text-[13px] font-semibold whitespace-nowrap text-slate-900">{t.hostname}</td>
-        <td className={`px-4 py-3 font-medium whitespace-nowrap ${PHASE_COLOR[phase.tone]}`} data-testid="phase">
+        <td className="px-4 py-2.5 font-mono text-[13px] font-semibold whitespace-nowrap text-slate-900">{t.hostname}</td>
+        <td className={`px-4 py-2.5 font-medium whitespace-nowrap ${PHASE_COLOR[phase.tone]}`} data-testid="phase">
           {phase.label}
         </td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-2.5">
           <StatusBadge status={t.status} />
         </td>
-        <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">{formatTime(t.startedAt)}</td>
-        <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">
+        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">{formatTime(t.startedAt)}</td>
+        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">
           {start !== null && end !== null ? formatDuration(end - start) : '—'}
         </td>
-        <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">{t.exitCode ?? '—'}</td>
+        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">{t.exitCode ?? '—'}</td>
       </tr>
       {open && (
         <tr>
@@ -391,7 +338,7 @@ function LogPanel({ deploymentId, target, phaseLabel }: { deploymentId: string; 
     }
   }, [deploymentId, target.id]);
 
-  // Recarrega quando a linha recebe um passo novo (lastLog muda a cada polling da página)
+  // Recarrega quando a linha recebe um passo novo (lastLog muda a cada polling do painel)
   // e, enquanto a máquina não termina, também no mesmo ritmo de 3 s.
   useEffect(() => {
     void load();
@@ -411,7 +358,7 @@ function LogPanel({ deploymentId, target, phaseLabel }: { deploymentId: string; 
   return (
     <div>
       <p className="mb-2 text-xs font-medium text-slate-600">
-        Log de instalação — <span className="font-mono">{target.hostname}</span>
+        Log — <span className="font-mono">{target.hostname}</span>
         <span className="text-slate-400"> — {phaseLabel}</span>
       </p>
       <div

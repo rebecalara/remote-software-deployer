@@ -357,6 +357,10 @@ export function toDeploymentView(d: DeploymentWithRelations): DeploymentView {
 export function deploymentListWhere(query: DeploymentListQuery, requesterId: string): Prisma.DeploymentWhereInput {
   const where: Prisma.DeploymentWhereInput = {};
   if (query.mine) where.userId = requesterId;
+  if (query.state === 'active') where.finishedAt = null;
+  if (query.state === 'finished' || query.finishedFrom) {
+    where.finishedAt = { not: null, ...(query.finishedFrom ? { gte: query.finishedFrom } : {}) };
+  }
   if (query.status) where.status = query.status;
   if (query.softwareId) where.softwareId = query.softwareId;
   if (query.from || query.to) {

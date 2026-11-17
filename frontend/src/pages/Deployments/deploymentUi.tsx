@@ -1,6 +1,6 @@
 import type { DeploymentCounts, DeploymentStatus } from '../../types/deployment';
 
-// Peças compartilhadas pelo acompanhamento (/deployments/:id), pelo Monitoramento e
+// Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
 // pelo Histórico.
 
 const STATUS_STYLE: Record<DeploymentStatus, { label: string; className: string; dot: string }> = {

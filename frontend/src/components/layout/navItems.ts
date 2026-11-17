@@ -36,7 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
 export function titleForPath(pathname: string): string {
   const item = NAV_ITEMS.find((i) => pathname.startsWith(i.path));
   if (item) return item.title;
-  // Fora do menu: o acompanhamento de uma implantação (/deployments/:id).
-  if (pathname.startsWith('/deployments/')) return 'Acompanhamento da implantação';
+  // Fora do menu: /deployments/:id só redireciona para o Monitoramento ou o Histórico.
+  if (pathname.startsWith('/deployments/')) return 'Implantação';
   return 'Remote Software Deployer';
 }

@@ -26,6 +26,16 @@ describe('parseDeploymentListQuery', () => {
       from: null,
       to: null,
       mine: false,
+      state: null,
+      finishedFrom: null,
+    });
+  });
+
+  it('state e finishedFrom: em andamento, encerradas e encerradas a partir de um instante', () => {
+    expect(parseDeploymentListQuery({ state: 'active' }).state).toBe('active');
+    expect(parseDeploymentListQuery({ state: 'finished', finishedFrom: '2026-11-15T12:00:00Z' })).toMatchObject({
+      state: 'finished',
+      finishedFrom: new Date('2026-11-15T12:00:00Z'),
     });
   });
 
@@ -57,6 +67,8 @@ describe('parseDeploymentListQuery', () => {
       from: new Date('2026-11-01T03:00:00.000Z'),
       to: new Date('2026-11-02T03:00:00.000Z'),
       mine: false,
+      state: null,
+      finishedFrom: null,
     });
   });
 
@@ -88,6 +100,10 @@ describe('parseDeploymentListQuery', () => {
     [{ from: '2026-11-01T00:00:00Z', to: '2026-11-01T00:00:00Z' }, 'to'],
     [{ status: ['FAILED', 'SUCCEEDED'] }, 'status'],
     [{ mine: '1' }, 'mine'],
+    [{ state: 'RUNNING' }, 'state'],
+    [{ state: 'done' }, 'state'],
+    [{ finishedFrom: 'ontem' }, 'finishedFrom'],
+    [{ state: 'active', finishedFrom: '2026-11-15T12:00:00Z' }, 'finishedFrom'],
     [{ mine: 'yes' }, 'mine'],
     [{ mine: ['true', 'true'] }, 'mine'],
   ])('recusa %p no campo %p (filtro ignorado em silêncio pareceria aplicado)', (query, field) => {

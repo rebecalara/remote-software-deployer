@@ -285,7 +285,7 @@ function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRest
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">
         <Link
-          to={`/deployments/${deployment.id}`}
+          to={`/monitoring?open=${deployment.id}`}
           className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
         >
           Ver acompanhamento

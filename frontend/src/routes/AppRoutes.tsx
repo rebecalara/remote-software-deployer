@@ -4,7 +4,7 @@ import { LoginPage } from '../pages/Login/LoginPage';
 import { MachinesPage } from '../pages/Machines/MachinesPage';
 import { SoftwarePage } from '../pages/Software/SoftwarePage';
 import { NewDeploymentPage } from '../pages/Deployments/NewDeploymentPage';
-import { DeploymentDetailsPage } from '../pages/Deployments/DeploymentDetailsPage';
+import { DeploymentRedirect } from '../pages/Deployments/DeploymentRedirect';
 import { MonitoringPage } from '../pages/Monitoring/MonitoringPage';
 import { DashboardPage } from '../pages/Dashboard/DashboardPage';
 import { HistoryPage } from '../pages/History/HistoryPage';
@@ -23,7 +23,7 @@ export function AppRoutes() {
           <Route path="/machines" element={<MachinesPage />} />
           <Route path="/software" element={<SoftwarePage />} />
           <Route path="/deployments/new" element={<NewDeploymentPage />} />
-          <Route path="/deployments/:id" element={<DeploymentDetailsPage />} />
+          <Route path="/deployments/:id" element={<DeploymentRedirect />} />
         </Route>
       </Route>
 
