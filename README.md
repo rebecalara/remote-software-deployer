@@ -98,16 +98,35 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
 - **Como funciona:** a desinstalação usa o mesmo fluxo da instalação (fila, uma ação
   por vez em cada máquina, logs, Monitoramento, Histórico e permissões). Na máquina, o
   comando é sempre `msiexec.exe /x {ProductCode} /qn /norestart REBOOT=ReallySuppress`.
-  - O **ProductCode** é lido pelo servidor do próprio pacote MSI, no envio, com o pacote
-    aberto só para leitura. Por isso **nada é copiado** para a máquina.
-  - Nenhum argumento do catálogo é repassado.
+  **Nada é copiado** para a máquina, e nenhum argumento do catálogo é repassado.
+- **O que pode ser desinstalado:** em "Desinstalar", o passo 2 lista **o software
+  instalado nas máquinas selecionadas**, a partir do inventário guardado de cada uma
+  (RF08), com quantas delas têm cada item.
+  - **Qualquer MSI pode ser escolhido, inclusive fora do catálogo.**
+  - Os itens que não são MSI aparecem desativados.
+  - Máquinas sem inventário, ou com inventário de mais de 7 dias, geram um aviso e o
+    botão "Consultar agora".
+  - Os MSI do catálogo que nenhum inventário encontrou ficam numa seção à parte.
+- **De onde vem o ProductCode:**
+  - **MSI do catálogo:** é lido pelo servidor do próprio pacote, no envio, com o pacote
+    aberto só para leitura.
+  - **MSI fora do catálogo:** vem do inventário. A API só aceita um ProductCode que
+    apareça no inventário guardado de pelo menos uma das máquinas selecionadas. O nome, a
+    versão e o fabricante gravados na implantação vêm desse inventário, no servidor, e
+    não do navegador.
+- **Produto fora do catálogo:** a revisão mostra um aviso, e o passo 4 exige marcar
+  "Confirmo que este produto pode ser removido". Monitoramento, Histórico (com o filtro
+  "Fora do catálogo") e Dashboard mostram o nome do produto, e quem pediu continua
+  registrado.
 - **Produto ausente:** se o produto não estiver instalado na máquina, nada é executado e
   a máquina fica como sucesso, com o aviso "não estava instalado". O mesmo vale para o
   código 1605. Os códigos 0, 3010 e 1641 têm o mesmo tratamento da instalação.
 - **Software desativado** no catálogo pode ser desinstalado; instalar continua exigindo
   software ativo.
-- **EXE não tem desinstalação:** um EXE não traz um código de produto confiável, e cada
-  família de instalador desinstala de um jeito. A tela explica isso no próprio passo.
+- **Só MSI tem desinstalação:** para os outros, o único caminho seria executar o comando
+  de desinstalação gravado pelo próprio programa no registro (`UninstallString`), e o
+  sistema não executa comandos que não sejam dele. O script de inventário nem lê esse
+  valor. A tela explica isso no próprio passo.
 
 ## Telas
 
@@ -117,6 +136,7 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
 | **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Implantação**, revisão com o comando exato que será executado<br/>![Nova Implantação](docs/img/05-nova-instalacao-revisao.png) |
 | **Monitoramento**, com a implantação expandida na própria linha e o log da máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros, uma implantação parcial expandida<br/>![Histórico](docs/img/07-historico.png) |
 | **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | **Software instalado** na máquina (RF08), consultado ao vivo<br/>![Inventário](docs/img/09-inventario.png) |
+| **Desinstalação pelo inventário**: MSI fora do catálogo, em quantas máquinas está, "Consultar agora"<br/>![Desinstalação pelo inventário](docs/img/10-desinstalacao-inventario.png) | |
 
 Os prints foram feitos no ambiente de desenvolvimento, só com dados fictícios: as
 máquinas `WS-*` vêm do OpenLDAP local, e a `RSD-ALVO-01` é uma VM de laboratório. O
@@ -138,10 +158,11 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
     permitidos e passados como parâmetros (`Start-Process -ArgumentList`), nunca por
     `Invoke-Expression` ou `cmd /c`.
   - Não existe o tipo "script".
-  - Na desinstalação, o comando também é fixo (`msiexec /x {ProductCode}`): o
-    ProductCode é lido pelo servidor do pacote, com outro script fixo
+  - Na desinstalação, o comando também é fixo (`msiexec /x {ProductCode}`). O
+    ProductCode vem do próprio pacote MSI, lido no servidor por outro script fixo
     ([`backend/scripts/read-msi-info.ps1`](backend/scripts/read-msi-info.ps1)) que abre
-    o MSI só para leitura. Nenhum argumento do catálogo é usado.
+    o MSI só para leitura, ou do inventário guardado das máquinas selecionadas. Nenhum
+    argumento do catálogo é usado, e o `UninstallString` do registro nunca é executado.
 - **O sistema nunca reinicia as máquinas.** O MSI roda com `/norestart`, e
   `REBOOT=ReallySuppress` é sempre o último argumento, na instalação e na desinstalação. O catálogo recusa `REBOOT` com
   outro valor. Isso foi encontrado na prática: na VM de teste, um `REBOOT=Force` vindo
@@ -309,9 +330,13 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   status só aparece quando a implantação tenta conectar.
 - **EXE sem verificação de "já instalado":** só o MSI traz um código de produto
   confiável. Um EXE implantado de novo é executado de novo.
-- **Desinstalação só para MSI, e por versão:** o ProductCode é o da versão cadastrada no
-  catálogo. Se a máquina tiver outra versão do produto, o resultado é "não estava
-  instalado"; para removê-la, cadastra-se o MSI dessa versão.
+- **Desinstalação só para MSI, e por versão:** cada ProductCode corresponde a uma
+  versão do produto. Pelo inventário dá para escolher a versão que está de fato
+  instalada. Uma máquina sem inventário, ou com inventário desatualizado, pode ter outra
+  versão, e nesse caso o resultado é "não estava instalado".
+- **Produto fora do catálogo:** o sistema confere o ProductCode, mas não tem como saber
+  se o produto é crítico (antivírus, agente de gerenciamento, biblioteca de outro
+  programa). Por isso o aviso e a confirmação obrigatória.
 - **Inventário:**
   - **é uma foto:** a lista mostra o momento da consulta, com data e quem consultou;
   - **programas instalados só para um usuário não aparecem:** eles ficam no perfil
