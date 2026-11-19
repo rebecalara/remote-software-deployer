@@ -322,7 +322,7 @@ export function MachinesPage() {
           )}
         </div>
 
-        {/* Barra de seleção (RF03) — "Implantar software" abre a Nova Instalação já com estas máquinas */}
+        {/* Barra de seleção (RF03) — "Implantar software" abre a Nova Implantação já com estas máquinas */}
         {selected.size > 0 && (
           <div className="sticky bottom-4 z-10 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
             <p className="text-sm font-medium text-slate-900">

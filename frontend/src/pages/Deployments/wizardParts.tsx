@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// Peças visuais compartilhadas pelos passos da Nova Instalação.
+// Peças visuais compartilhadas pelos passos da Nova Implantação.
 
 export const STEPS: Array<{ label: string }> = [
   { label: 'Selecionar máquinas' },

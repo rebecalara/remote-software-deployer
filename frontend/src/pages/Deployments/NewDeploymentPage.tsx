@@ -332,7 +332,7 @@ function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRest
           onClick={onRestart}
           className="rounded-lg px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
         >
-          Nova instalação
+          Nova implantação
         </button>
       </div>
     </section>

@@ -92,7 +92,7 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 
 ### Acréscimo fora do RFC: desinstalação remota (só MSI)
 
-Na Nova Instalação, o passo do software tem a escolha **Instalar / Desinstalar**.
+Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstalar**.
 
 - **Como funciona:** a desinstalação usa o mesmo fluxo da instalação (fila, uma ação
   por vez em cada máquina, logs, Monitoramento, Histórico e permissões). Na máquina, o
@@ -113,7 +113,7 @@ Na Nova Instalação, o passo do software tem a escolha **Instalar / Desinstalar
 | | |
 |---|---|
 | **Login** com a conta de rede<br/>![Login](docs/img/01-login.png) | **Máquinas** sincronizadas com o AD, com o painel de detalhes<br/>![Máquinas](docs/img/03-maquinas.png) |
-| **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Instalação**, revisão com o comando exato que será executado<br/>![Nova Instalação](docs/img/05-nova-instalacao-revisao.png) |
+| **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Implantação**, revisão com o comando exato que será executado<br/>![Nova Implantação](docs/img/05-nova-instalacao-revisao.png) |
 | **Monitoramento**, com a implantação expandida na própria linha e o log da máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros, uma implantação parcial expandida<br/>![Histórico](docs/img/07-historico.png) |
 | **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | |
 

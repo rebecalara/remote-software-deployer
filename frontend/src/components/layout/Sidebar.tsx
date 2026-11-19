@@ -22,7 +22,7 @@ function SectionTitle({ collapsed, className = '', children }: { collapsed: bool
 
 export function Sidebar({ collapsed, onToggleCollapsed, onCloseMobile, onLogout }: SidebarProps) {
   const { user } = useAuth();
-  // Item com `roles` só aparece para esses perfis (ex.: "Nova Instalação" não aparece
+  // Item com `roles` só aparece para esses perfis (ex.: "Nova Implantação" não aparece
   // para VIEWER — a página só mostraria o aviso de que ele não pode implantar).
   const availableItems = NAV_ITEMS.filter(
     (item) => item.available && (!item.roles || (user !== null && item.roles.includes(user.role))),

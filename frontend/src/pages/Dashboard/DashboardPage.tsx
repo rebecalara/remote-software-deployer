@@ -132,7 +132,7 @@ export function DashboardPage() {
                   to="/deployments/new"
                   className="block rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
                 >
-                  Nova instalação
+                  Nova implantação
                 </Link>
               )}
               <QuickLink to="/machines">Gerenciar máquinas</QuickLink>

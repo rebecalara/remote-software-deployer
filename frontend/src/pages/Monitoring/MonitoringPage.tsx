@@ -12,7 +12,7 @@ import { Counter, LiveIndicator, MineToggle } from '../Deployments/deploymentUi'
 // Monitoramento (Bloco 5, RF06/RF10): implantações em andamento e, abaixo, as encerradas
 // nas últimas 24 h. Cada implantação expande na própria linha (máquinas, fases, logs e
 // "Cancelar pendentes"). ?open=<id> abre e destaca uma implantação (tela de sucesso da
-// Nova Instalação, Dashboard). Polling de 3 s só enquanto houver implantação em
+// Nova Implantação, Dashboard). Polling de 3 s só enquanto houver implantação em
 // andamento (PLANNING §9: sem WebSocket no MVP). O alternador "Todas / Minhas" filtra
 // as listas; os contadores são sempre de todas.
 const POLL_MS = 3_000;
@@ -184,7 +184,7 @@ export function MonitoringPage() {
               </p>
               {canDeploy && (
                 <Link to="/deployments/new" className="mt-2 inline-block text-sm font-medium text-blue-700 hover:underline">
-                  Nova instalação
+                  Nova implantação
                 </Link>
               )}
             </div>
