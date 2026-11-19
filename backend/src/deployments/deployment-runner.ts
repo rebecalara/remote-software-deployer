@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { DeploymentAction, DeploymentStatus, LogLevel } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus, InstallType, LogLevel } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { aggregateDeploymentStatus, interpretResult } from './deployment-outcome';
@@ -115,21 +115,25 @@ export class DeploymentRunner implements OnApplicationBootstrap {
 
       const action = target.deployment.action;
       const uninstall = action === DeploymentAction.UNINSTALL;
-      log.write(
-        LogLevel.INFO,
-        `Iniciando a ${uninstall ? 'desinstalação' : 'instalação'} de ${software.name} ${software.version} em ${hostname}.`,
-      );
+      // Desinstalação: a cópia do produto gravada na implantação (pode não haver software
+      // do catálogo — MSI escolhido pelo inventário). Instalação: sempre há software.
+      const d = target.deployment;
+      const label = d.productName
+        ? `${d.productName}${d.productVersion ? ` ${d.productVersion}` : ''}`
+        : `${software!.name} ${software!.version}`;
+      log.write(LogLevel.INFO, `Iniciando a ${uninstall ? 'desinstalação' : 'instalação'} de ${label} em ${hostname}.`);
 
       let result: DeployResult;
       if (uninstall) {
         // Só o ProductCode vai para a máquina: nada é copiado, e os argumentos do
         // catálogo (propriedades de instalação) não são repassados.
-        result = software.msiProductCode
+        const productCode = d.productCode ?? software?.msiProductCode ?? null;
+        result = productCode
           ? await this.executor.run(
-              { action: 'UNINSTALL', targetId, computerName: hostname, installType: 'MSI', productCode: software.msiProductCode },
+              { action: 'UNINSTALL', targetId, computerName: hostname, installType: 'MSI', productCode },
               (event) => log.write(event.level, event.message),
             )
-          : { ok: false, phase: 'validate', reason: 'invalid-input', message: 'O software não tem ProductCode para desinstalar.' };
+          : { ok: false, phase: 'validate', reason: 'invalid-input', message: 'A implantação não tem ProductCode para desinstalar.' };
       } else {
         const installerProblem = await this.installerProblem(software.installerFileName);
         result = installerProblem
@@ -149,7 +153,7 @@ export class DeploymentRunner implements OnApplicationBootstrap {
             );
       }
 
-      const outcome = interpretResult(result, software.installType, action);
+      const outcome = interpretResult(result, software?.installType ?? InstallType.MSI, action);
       log.write(outcome.level, outcome.message);
       await log.flush();
 

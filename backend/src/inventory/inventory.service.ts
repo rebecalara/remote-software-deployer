@@ -21,6 +21,8 @@ import { PrismaService } from '../prisma/prisma.service';
 
 /** Consultas ao mesmo tempo no servidor (decisão da autora). */
 export const MAX_CONCURRENT_INVENTORIES = 5;
+/** Inventário "antigo" para a desinstalação pelo inventário (decisão da autora). */
+export const INVENTORY_STALE_DAYS = 7;
 
 export interface CatalogMatch {
   softwareId: string;
@@ -40,6 +42,29 @@ export interface InventoryView {
   collectedAt: string;
   collectedBy: { username: string; displayName: string | null };
   items: InventoryItemView[];
+}
+
+/** Um item (ou grupo de itens iguais) do software instalado nas máquinas selecionadas. */
+export interface InventoryProductGroup {
+  key: string;
+  /** MSI = pode ser desinstalado pelo ProductCode; OTHER = não (nunca pelo UninstallString). */
+  kind: 'MSI' | 'OTHER';
+  productCode: string | null;
+  name: string;
+  version: string | null;
+  publisher: string | null;
+  /** Máquinas selecionadas que têm o item, na ordem da seleção. */
+  machineIds: string[];
+  catalog: CatalogMatch | null;
+}
+
+/** POST /machines/inventory-summary */
+export interface InventorySummary {
+  staleAfterDays: number;
+  machines: Array<{ id: string; hostname: string; seenInLastSync: boolean; inventoryAt: string | null; stale: boolean }>;
+  products: InventoryProductGroup[];
+  /** MSI do catálogo que nenhum inventário das máquinas selecionadas encontrou. */
+  catalogNotFound: Array<{ softwareId: string; name: string; version: string; active: boolean; productCode: string }>;
 }
 
 /** GET /machines/:id/inventory: a última consulta e se dá para consultar de novo aqui. */
@@ -147,12 +172,25 @@ export class InventoryService {
     collectedBy: { username: string; displayName: string | null };
   }): Promise<InventoryView> {
     const items = (Array.isArray(row.items) ? row.items : []) as unknown as InventoryItem[];
-    const codes = [...new Set(items.map((i) => i.productCode).filter((c): c is string => !!c))];
-    const software = codes.length
+    const byCode = await this.catalogByCode(items.map((i) => i.productCode));
+    return {
+      machineId: row.machineId,
+      collectedAt: row.collectedAt.toISOString(),
+      collectedBy: row.collectedBy,
+      items: items.map((i) => ({ ...i, catalog: i.productCode ? (byCode.get(i.productCode) ?? null) : null })),
+    };
+  }
+
+  /**
+   * Software MSI do catálogo por ProductCode. Mais de um cadastro com o mesmo pacote: o
+   * ativo primeiro, depois o mais antigo (a mesma regra da desinstalação por ProductCode).
+   */
+  private async catalogByCode(codes: Array<string | null>): Promise<Map<string, CatalogMatch>> {
+    const unique = [...new Set(codes.filter((c): c is string => !!c))];
+    const software = unique.length
       ? await this.prisma.software.findMany({
-          where: { installType: InstallType.MSI, msiProductCode: { in: codes } },
+          where: { installType: InstallType.MSI, msiProductCode: { in: unique } },
           select: { id: true, name: true, version: true, active: true, msiProductCode: true },
-          // Mais de um cadastro com o mesmo pacote: o ativo primeiro.
           orderBy: [{ active: 'desc' }, { createdAt: 'asc' }],
         })
       : [];
@@ -162,11 +200,95 @@ export class InventoryService {
         byCode.set(s.msiProductCode, { softwareId: s.id, name: s.name, version: s.version, active: s.active, uninstallAvailable: true });
       }
     }
+    return byCode;
+  }
+
+  /**
+   * Desinstalação pelo inventário: o software instalado nas máquinas selecionadas,
+   * agrupado (MSI pelo ProductCode; o resto por nome e versão), com quantas delas têm
+   * cada item, a partir da ÚLTIMA consulta guardada de cada máquina. Também: máquinas sem
+   * inventário ou com inventário antigo (mais de INVENTORY_STALE_DAYS dias) e os MSI do
+   * catálogo que nenhum inventário encontrou (podem estar numa máquina sem consulta).
+   * Só leitura — nada é consultado ao vivo aqui.
+   */
+  async summary(machineIds: string[], now: Date = new Date()): Promise<InventorySummary> {
+    const [machines, aggregate, inventories] = await Promise.all([
+      this.prisma.machine.findMany({ where: { id: { in: machineIds } }, select: { id: true, hostname: true, lastSync: true } }),
+      this.prisma.machine.aggregate({ _max: { lastSync: true } }),
+      this.prisma.machineInventory.findMany({
+        where: { machineId: { in: machineIds } },
+        orderBy: { collectedAt: 'desc' },
+        select: { machineId: true, collectedAt: true, items: true },
+      }),
+    ]);
+    if (machines.length !== machineIds.length) {
+      throw new NotFoundException('Uma ou mais máquinas selecionadas não existem mais. Atualize a lista.');
+    }
+    const staleBefore = now.getTime() - INVENTORY_STALE_DAYS * 24 * 60 * 60 * 1000;
+    const invByMachine = new Map(inventories.map((i) => [i.machineId, i]));
+
+    // A consulta mais recente vem primeiro: o nome/versão do grupo é o dela.
+    const groups = new Map<string, InventoryProductGroup & { machineSet: Set<string> }>();
+    for (const inv of inventories) {
+      const items = (Array.isArray(inv.items) ? inv.items : []) as unknown as InventoryItem[];
+      for (const item of items) {
+        const key = item.productCode ? `MSI|${item.productCode}` : `OTHER|${item.name.toLowerCase()}|${item.version ?? ''}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = {
+            key,
+            kind: item.productCode ? 'MSI' : 'OTHER',
+            productCode: item.productCode,
+            name: item.name,
+            version: item.version,
+            publisher: item.publisher,
+            machineIds: [],
+            catalog: null,
+            machineSet: new Set(),
+          };
+          groups.set(key, g);
+        }
+        g.machineSet.add(inv.machineId);
+      }
+    }
+    const byCode = await this.catalogByCode([...groups.values()].map((g) => g.productCode));
+    const products: InventoryProductGroup[] = [...groups.values()]
+      .map(({ machineSet, ...g }) => ({
+        ...g,
+        machineIds: machineIds.filter((id) => machineSet.has(id)),
+        catalog: g.productCode ? (byCode.get(g.productCode) ?? null) : null,
+      }))
+      .sort((a, b) => b.machineIds.length - a.machineIds.length || a.name.localeCompare(b.name, 'pt-BR'));
+
+    const foundCodes = [...groups.values()].map((g) => g.productCode).filter((c): c is string => !!c);
+    const catalogNotFound = await this.prisma.software.findMany({
+      where: { installType: InstallType.MSI, msiProductCode: { not: null, notIn: foundCodes } },
+      select: { id: true, name: true, version: true, active: true, msiProductCode: true },
+      orderBy: [{ name: 'asc' }, { version: 'asc' }],
+    });
+
     return {
-      machineId: row.machineId,
-      collectedAt: row.collectedAt.toISOString(),
-      collectedBy: row.collectedBy,
-      items: items.map((i) => ({ ...i, catalog: i.productCode ? (byCode.get(i.productCode) ?? null) : null })),
+      staleAfterDays: INVENTORY_STALE_DAYS,
+      machines: machines
+        .map((m) => {
+          const inv = invByMachine.get(m.id);
+          return {
+            id: m.id,
+            hostname: m.hostname,
+            seenInLastSync: isSeenInLastSync(m.lastSync, aggregate._max.lastSync),
+            inventoryAt: inv ? inv.collectedAt.toISOString() : null,
+            stale: inv ? inv.collectedAt.getTime() < staleBefore : false,
+          };
+        })
+        .sort((a, b) => a.hostname.localeCompare(b.hostname)),
+      products,
+      catalogNotFound: catalogNotFound.map((s) => ({
+        softwareId: s.id,
+        name: s.name,
+        version: s.version,
+        active: s.active,
+        productCode: s.msiProductCode!,
+      })),
     };
   }
 }

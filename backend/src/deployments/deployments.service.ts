@@ -5,13 +5,13 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { DeploymentAction, DeploymentStatus, InstallType, LogLevel, Prisma } from '@prisma/client';
+import { DeploymentAction, DeploymentStatus, InstallType, LogLevel, Prisma, Software } from '@prisma/client';
 import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { SoftwareService } from '../software/software.service';
 import { DeploymentRunner } from './deployment-runner';
-import { DeploymentCreateInput, DeploymentListQuery } from './deployment-validation';
+import { DeploymentCreateInput, DeploymentListQuery, OUTSIDE_CATALOG } from './deployment-validation';
 import { PowerShellExecutor } from './powershell-executor';
 
 export const SUMMARY_WINDOW_HOURS = 24;
@@ -64,6 +64,14 @@ export interface DeploymentCounts {
   cancelled: number;
 }
 
+/** Cópia do produto gravada na desinstalação (do catálogo ou do inventário). */
+interface ProductSnapshot {
+  code: string;
+  name: string;
+  version: string | null;
+  publisher: string | null;
+}
+
 interface DeploymentBase {
   id: string;
   name: string;
@@ -73,7 +81,10 @@ interface DeploymentBase {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  software: { id: string; name: string; version: string; installType: InstallType };
+  /** null = desinstalação de um MSI fora do catálogo (ver `product`). */
+  software: { id: string; name: string; version: string; installType: InstallType } | null;
+  /** Desinstalação: o produto removido (cópia do momento da criação). null na instalação. */
+  product: { productCode: string; name: string; version: string | null; publisher: string | null } | null;
   requestedBy: { username: string; displayName: string | null };
   counts: DeploymentCounts;
 }
@@ -134,40 +145,87 @@ export class DeploymentsService {
       );
     }
 
-    const software = await this.prisma.software.findUnique({ where: { id: input.softwareId } });
-    if (!software) throw new NotFoundException('Software não encontrado.');
     const uninstall = input.action === DeploymentAction.UNINSTALL;
+    // Primeiro as máquinas: a desinstalação por ProductCode depende do inventário delas.
+    const machines = await this.checkMachines(input.machineIds);
 
-    if (uninstall) {
-      // Desinstalação: só MSI e só o ProductCode — o instalador não é copiado, então não
-      // precisa estar na pasta. Software desativado PODE ser desinstalado (decisão da
-      // autora): desativar no catálogo costuma ser o momento de remover das máquinas.
-      if (software.installType !== InstallType.MSI) throw new ConflictException(EXE_UNINSTALL_UNAVAILABLE);
-      const code = software.msiProductCode ?? (await this.softwareService?.ensureMsiProductCode(software.id)) ?? null;
-      if (!code) throw new ConflictException(MISSING_PRODUCT_CODE);
+    let software: Software | null = null;
+    let product: ProductSnapshot | null = null;
+    if (input.productCode) {
+      // Desinstalação pelo inventário (pode estar fora do catálogo). O ProductCode precisa
+      // aparecer na última consulta guardada de pelo menos uma das máquinas; nome, versão
+      // e fabricante vêm desse inventário, no servidor (decisão da autora).
+      product = await this.productFromInventory(input.productCode, input.machineIds);
+      // Se o mesmo pacote estiver no catálogo, a implantação fica ligada a ele (ativo
+      // primeiro, depois o mais antigo — a mesma regra da marcação do inventário).
+      software = await this.prisma.software.findFirst({
+        where: { installType: InstallType.MSI, msiProductCode: input.productCode },
+        orderBy: [{ active: 'desc' }, { createdAt: 'asc' }],
+      });
     } else {
-      if (!software.active) {
+      software = await this.prisma.software.findUnique({ where: { id: input.softwareId! } });
+      if (!software) throw new NotFoundException('Software não encontrado.');
+    }
+
+    if (uninstall && !input.productCode) {
+      // Desinstalação de um software do catálogo: só MSI e só o ProductCode — o
+      // instalador não é copiado, então não precisa estar na pasta. Software desativado
+      // PODE ser desinstalado (decisão da autora).
+      if (software!.installType !== InstallType.MSI) throw new ConflictException(EXE_UNINSTALL_UNAVAILABLE);
+      const code = software!.msiProductCode ?? (await this.softwareService?.ensureMsiProductCode(software!.id)) ?? null;
+      if (!code) throw new ConflictException(MISSING_PRODUCT_CODE);
+      product = { code, name: software!.name, version: software!.version, publisher: software!.vendor };
+    } else if (!uninstall) {
+      if (!software!.active) {
         throw new ConflictException('Este software está desativado e não pode ser implantado.');
       }
-      if (!software.installerFileName) {
+      if (!software!.installerFileName) {
         throw new ConflictException('Este software ainda não tem instalador enviado.');
       }
       if (!this.storage.isAvailable) {
         throw new ServiceUnavailableException('Armazenamento de instaladores não configurado no servidor.');
       }
-      if (!(await this.storage.exists(software.installerFileName))) {
+      if (!(await this.storage.exists(software!.installerFileName))) {
         throw new ConflictException(
           'O arquivo do instalador deste software não foi encontrado na pasta de instaladores do servidor.',
         );
       }
     }
+    void machines;
 
+    const count = input.machineIds.length;
+    const label = product ? `${product.name}${product.version ? ` ${product.version}` : ''}` : `${software!.name} ${software!.version}`;
+    const name =
+      input.name ?? `${uninstall ? 'Desinstalar ' : ''}${label} — ${count} ${count === 1 ? 'máquina' : 'máquinas'}`;
+
+    const created = await this.prisma.deployment.create({
+      data: {
+        name,
+        action: input.action,
+        user: { connect: { id: userId } },
+        ...(software ? { software: { connect: { id: software.id } } } : {}),
+        ...(product
+          ? { productCode: product.code, productName: product.name, productVersion: product.version, productPublisher: product.publisher }
+          : {}),
+        targets: { create: input.machineIds.map((machineId) => ({ machine: { connect: { id: machineId } } })) },
+      },
+      include: deploymentInclude,
+    });
+
+    // Na ordem da seleção: o Prisma não garante a ordem dos alvos criados.
+    const targetByMachine = new Map(created.targets.map((t) => [t.machineId, t.id]));
+    this.runner.enqueue(input.machineIds.map((machineId) => ({ targetId: targetByMachine.get(machineId)!, machineId })));
+    return toDeploymentView(created);
+  }
+
+  /** Máquinas existentes e presentes na última sincronização com o AD (400/409). */
+  private async checkMachines(machineIds: string[]) {
     const [machines, aggregate] = await Promise.all([
-      this.prisma.machine.findMany({ where: { id: { in: input.machineIds } } }),
+      this.prisma.machine.findMany({ where: { id: { in: machineIds } } }),
       this.prisma.machine.aggregate({ _max: { lastSync: true } }),
     ]);
-    if (machines.length !== input.machineIds.length) {
-      const missing = input.machineIds.length - machines.length;
+    if (machines.length !== machineIds.length) {
+      const missing = machineIds.length - machines.length;
       throw new BadRequestException({
         statusCode: 400,
         error: 'Bad Request',
@@ -182,27 +240,31 @@ export class DeploymentsService {
         `Máquina(s) não encontrada(s) no AD na última sincronização: ${notInAd.sort().join(', ')}.`,
       );
     }
+    return machines;
+  }
 
-    const count = input.machineIds.length;
-    const name =
-      input.name ??
-      `${uninstall ? 'Desinstalar ' : ''}${software.name} ${software.version} — ${count} ${count === 1 ? 'máquina' : 'máquinas'}`;
-
-    const created = await this.prisma.deployment.create({
-      data: {
-        name,
-        action: input.action,
-        user: { connect: { id: userId } },
-        software: { connect: { id: software.id } },
-        targets: { create: input.machineIds.map((machineId) => ({ machine: { connect: { id: machineId } } })) },
-      },
-      include: deploymentInclude,
+  /**
+   * O produto (MSI) com este ProductCode, como aparece na consulta MAIS RECENTE entre as
+   * máquinas selecionadas que o têm. 409 se não aparecer em nenhuma.
+   */
+  private async productFromInventory(productCode: string, machineIds: string[]): Promise<ProductSnapshot> {
+    const inventories = await this.prisma.machineInventory.findMany({
+      where: { machineId: { in: machineIds } },
+      orderBy: { collectedAt: 'desc' },
+      select: { items: true },
     });
-
-    // Na ordem da seleção: o Prisma não garante a ordem dos alvos criados.
-    const targetByMachine = new Map(created.targets.map((t) => [t.machineId, t.id]));
-    this.runner.enqueue(input.machineIds.map((machineId) => ({ targetId: targetByMachine.get(machineId)!, machineId })));
-    return toDeploymentView(created);
+    for (const inv of inventories) {
+      const items = (Array.isArray(inv.items) ? inv.items : []) as Array<Record<string, unknown>>;
+      const hit = items.find((i) => i.productCode === productCode);
+      if (hit && typeof hit.name === 'string') {
+        const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v : null);
+        return { code: productCode, name: hit.name, version: text(hit.version), publisher: text(hit.publisher) };
+      }
+    }
+    throw new ConflictException(
+      'Este ProductCode não aparece no software instalado guardado de nenhuma das máquinas selecionadas. ' +
+        'Consulte o software instalado delas e tente de novo.',
+    );
   }
 
   /**
@@ -351,7 +413,10 @@ function toBase(d: DeploymentSummaryRow | DeploymentWithRelations): DeploymentBa
     createdAt: d.createdAt.toISOString(),
     startedAt: d.startedAt?.toISOString() ?? null,
     finishedAt: d.finishedAt?.toISOString() ?? null,
-    software: d.software,
+    software: d.software ?? null,
+    product: d.productCode
+      ? { productCode: d.productCode, name: d.productName ?? d.productCode, version: d.productVersion, publisher: d.productPublisher }
+      : null,
     requestedBy: d.user,
     counts: countStatuses(d.targets.map((t) => t.status)),
   };
@@ -389,7 +454,7 @@ export function deploymentListWhere(query: DeploymentListQuery, requesterId: str
   }
   if (query.action) where.action = query.action;
   if (query.status) where.status = query.status;
-  if (query.softwareId) where.softwareId = query.softwareId;
+  if (query.softwareId) where.softwareId = query.softwareId === OUTSIDE_CATALOG ? null : query.softwareId;
   if (query.from || query.to) {
     where.createdAt = { ...(query.from ? { gte: query.from } : {}), ...(query.to ? { lt: query.to } : {}) };
   }

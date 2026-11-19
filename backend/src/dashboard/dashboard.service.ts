@@ -27,6 +27,8 @@ export interface ActivityItem {
   total?: number;
   softwareName: string;
   softwareVersion: string;
+  /** deployment: false = produto fora do catálogo (desinstalação pelo inventário). */
+  inCatalog?: boolean;
 }
 
 export interface SystemCheck {
@@ -157,8 +159,10 @@ export class DashboardService {
         succeeded: d.targets.filter((t) => t.status === DeploymentStatus.SUCCEEDED).length,
         failed: d.targets.filter((t) => t.status === DeploymentStatus.FAILED).length,
         total: d.targets.length,
-        softwareName: d.software.name,
-        softwareVersion: d.software.version,
+        // Desinstalação de MSI fora do catálogo: não há software; vale a cópia do produto.
+        softwareName: d.software?.name ?? d.productName ?? d.productCode ?? '—',
+        softwareVersion: d.software ? d.software.version : (d.productVersion ?? ''),
+        inCatalog: d.software !== null,
       })),
       ...software.map((s) => ({
         kind: 'software' as const,

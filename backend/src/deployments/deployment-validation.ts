@@ -11,7 +11,14 @@ export type DeploymentActionValue = 'INSTALL' | 'UNINSTALL';
 export interface DeploymentCreateInput {
   /** Ausente = INSTALL. Desinstalar só existe para MSI (conferido no service). */
   action: DeploymentActionValue;
-  softwareId: string;
+  /** Software do catálogo. Na desinstalação, exatamente um entre softwareId e productCode. */
+  softwareId: string | null;
+  /**
+   * Só desinstalação: ProductCode de um MSI do inventário guardado das máquinas (pode não
+   * estar no catálogo). O service confere que ele aparece no inventário de pelo menos uma
+   * das máquinas e tira de lá o nome, a versão e o fabricante — nunca do navegador.
+   */
+  productCode: string | null;
   /** Sem repetição, na ordem em que vieram. */
   machineIds: string[];
   /** null = o servidor gera ("7-Zip 26.06 — 5 máquinas"). */
@@ -20,7 +27,11 @@ export interface DeploymentCreateInput {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-const ALLOWED_FIELDS = new Set(['action', 'softwareId', 'machineIds', 'name']);
+const ALLOWED_FIELDS = new Set(['action', 'softwareId', 'productCode', 'machineIds', 'name']);
+/** ProductCode do Windows Installer: GUID entre chaves. */
+const PRODUCT_CODE = /^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$/i;
+/** Filtro do Histórico: implantações de produtos fora do catálogo (softwareId nulo). */
+export const OUTSIDE_CATALOG = 'none';
 
 export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -38,8 +49,22 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
     action = data.action;
   }
 
-  if (typeof data.softwareId !== 'string' || !UUID.test(data.softwareId)) {
-    throw invalid('softwareId', 'Selecione um software válido.');
+  let softwareId: string | null = null;
+  let productCode: string | null = null;
+  if (data.productCode !== undefined && data.productCode !== null) {
+    if (action !== 'UNINSTALL') throw invalid('productCode', 'ProductCode só vale para desinstalar.');
+    if (typeof data.productCode !== 'string' || !PRODUCT_CODE.test(data.productCode)) {
+      throw invalid('productCode', 'ProductCode inválido.');
+    }
+    if (data.softwareId !== undefined && data.softwareId !== null) {
+      throw invalid('productCode', 'Informe o software do catálogo ou o ProductCode, não os dois.');
+    }
+    productCode = data.productCode.toUpperCase();
+  } else {
+    if (typeof data.softwareId !== 'string' || !UUID.test(data.softwareId)) {
+      throw invalid('softwareId', 'Selecione um software válido.');
+    }
+    softwareId = data.softwareId.toLowerCase();
   }
 
   if (!Array.isArray(data.machineIds) || data.machineIds.length === 0) {
@@ -64,7 +89,7 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
     name = trimmed || null;
   }
 
-  return { action, softwareId: data.softwareId.toLowerCase(), machineIds, name };
+  return { action, softwareId, productCode, machineIds, name };
 }
 
 function invalid(field: string, message: string): BadRequestException {
@@ -142,7 +167,9 @@ export function parseDeploymentListQuery(query: Record<string, unknown>): Deploy
     throw invalid('status', 'Status inválido.');
   }
   const softwareId = text('softwareId');
-  if (softwareId !== null && !UUID.test(softwareId)) throw invalid('softwareId', 'Software inválido.');
+  if (softwareId !== null && softwareId !== OUTSIDE_CATALOG && !UUID.test(softwareId)) {
+    throw invalid('softwareId', 'Software inválido.');
+  }
   const machine = text('machine');
   if (machine !== null && (machine.length > MAX_MACHINE_FILTER_LENGTH || CONTROL_CHARS.test(machine))) {
     throw invalid('machine', `O nome da máquina deve ter no máximo ${MAX_MACHINE_FILTER_LENGTH} caracteres.`);

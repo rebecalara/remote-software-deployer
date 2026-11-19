@@ -20,6 +20,7 @@ describe('validateDeploymentCreate', () => {
     expect(validateDeploymentCreate({ softwareId: SW, machineIds: [M1, M2, M1.toUpperCase()] })).toEqual({
       action: 'INSTALL',
       softwareId: SW,
+      productCode: null,
       machineIds: [M1, M2],
       name: null,
     });

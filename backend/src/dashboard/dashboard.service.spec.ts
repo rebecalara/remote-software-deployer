@@ -137,6 +137,7 @@ describe('DashboardService.overview', () => {
         total: 2,
         softwareName: '7-Zip',
         softwareVersion: '26.06',
+        inCatalog: true,
       },
       { kind: 'software', at: '2026-11-01T08:00:00.000Z', by: null, softwareName: 'Antigo', softwareVersion: '1' },
     ]);

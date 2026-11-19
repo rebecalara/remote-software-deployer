@@ -132,15 +132,27 @@ model Deployment {
   id         String           @id @default(uuid())
   name       String
   userId     String
-  softwareId String
+  /// Software do catálogo. Nulo só na desinstalação de um MSI que não está no catálogo
+  /// (ver o CHECK "Deployment_software_or_product_check" na migration).
+  softwareId String?
   status     DeploymentStatus @default(PENDING)
   action     DeploymentAction @default(INSTALL)
   createdAt  DateTime         @default(now())
   startedAt  DateTime?
   finishedAt DateTime?
 
+  /// Desinstalação: cópia do produto no momento da criação (do catálogo ou do inventário
+  /// guardado das máquinas). O runner usa este ProductCode; o Histórico mostra o nome
+  /// mesmo que o produto não esteja (ou deixe de estar) no catálogo.
+  productCode      String?
+  productName      String?
+  productVersion   String?
+  productPublisher String?
+
   user     User               @relation(fields: [userId], references: [id])
-  software Software           @relation(fields: [softwareId], references: [id])
+  // Restrict explícito: numa relação opcional o padrão do Prisma seria SetNull, e apagar
+  // um software esvaziaria o vínculo das implantações. Mantém o comportamento de antes.
+  software Software?          @relation(fields: [softwareId], references: [id], onDelete: Restrict)
   targets  DeploymentTarget[]
 
   @@index([userId])
