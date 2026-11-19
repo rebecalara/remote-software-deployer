@@ -22,7 +22,8 @@ O Remote Software Deployer centraliza esse trabalho num navegador:
    próprio sistema;
 4. acompanha a instalação em cada máquina, com o passo atual e o log;
 5. consulta depois o histórico de tudo o que foi instalado, por quem e com qual
-   resultado.
+   resultado;
+6. consulta, ao vivo, o software instalado numa máquina.
 
 Nada precisa ser instalado antes nas estações: o sistema usa recursos que o Windows já
 tem (WinRM e o compartilhamento administrativo).
@@ -83,7 +84,7 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 | RF05 | Executar instalação remota | ✅ Fila com até 10 máquinas em paralelo e uma instalação por vez em cada máquina. Validado numa VM de laboratório (ver [Limitações](#limitações-conhecidas)). |
 | RF06 | Acompanhar status | ✅ Monitoramento com as implantações em andamento e as encerradas nas últimas 24 h. Cada uma expande na própria linha, com a fase de cada máquina (conectando, copiando, conferindo o hash, instalando…), atualizada a cada 3 s. |
 | RF07 | Histórico de instalações | ✅ Implantações encerradas, com filtros por período, ação, status, software, máquina e "Minhas implantações", e paginação. Os filtros ficam no link. |
-| RF08 | Inventário de software instalado por máquina | ⏳ **Trabalho futuro.** Depende de consulta ao vivo pelo WinRM, já validada na prova de conceito, mas não implementada. |
+| RF08 | Inventário de software instalado por máquina | ✅ No painel da máquina: consulta ao vivo pelo WinRM, só de leitura, com nome, versão, fabricante, data de instalação e ProductCode. Os MSI do catálogo aparecem marcados, com atalho para desinstalar. A última consulta fica guardada, com data e quem consultou. |
 | RF09 | Registrar resultado | ✅ Status e código de saída por máquina. Os códigos do Windows Installer (1603, 1618…) aparecem com mensagem explicativa. |
 | RF10 | Mensagens de sucesso e falha | ✅ Cada falha diz a fase e o motivo (máquina não encontrada, WinRM recusado, acesso negado, hash diferente, tempo esgotado…). |
 | RF11 | Pesquisar e filtrar máquinas | ✅ Busca por nome, sistema ou setor; filtro por setor e por presença no AD. |
@@ -115,7 +116,7 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
 | **Login** com a conta de rede<br/>![Login](docs/img/01-login.png) | **Máquinas** sincronizadas com o AD, com o painel de detalhes<br/>![Máquinas](docs/img/03-maquinas.png) |
 | **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Implantação**, revisão com o comando exato que será executado<br/>![Nova Implantação](docs/img/05-nova-instalacao-revisao.png) |
 | **Monitoramento**, com a implantação expandida na própria linha e o log da máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros, uma implantação parcial expandida<br/>![Histórico](docs/img/07-historico.png) |
-| **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | |
+| **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | **Software instalado** na máquina (RF08), consultado ao vivo<br/>![Inventário](docs/img/09-inventario.png) |
 
 Os prints foram feitos no ambiente de desenvolvimento, só com dados fictícios: as
 máquinas `WS-*` vêm do OpenLDAP local, e a `RSD-ALVO-01` é uma VM de laboratório. O
@@ -153,8 +154,16 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
   serviço do Windows sob uma **conta de serviço gerenciada (gMSA)**, e o WinRM usa a
   identidade do processo via Kerberos, sem senha em arquivo. Quem *pediu* a implantação
   fica registrado.
+- **Inventário só de leitura.** A consulta do software instalado (RF08) usa outro script
+  fixo ([`backend/scripts/inventory-target.ps1`](backend/scripts/inventory-target.ps1)),
+  que só lê as chaves Uninstall do registro, de 64 e 32 bits.
+  - Na máquina, nada é copiado e nenhum processo é iniciado.
+  - **Nunca `Win32_Product`:** consultar essa classe faz o Windows Installer verificar e
+    reparar cada MSI instalado.
+  - No teste com a VM, a consulta não gerou nenhum evento do Windows Installer.
 - **Permissões por perfil no backend.** Toda rota exige o token JWT. Implantar,
-  cancelar e alterar o catálogo exigem ADMIN ou OPERATOR. O VIEWER só consulta.
+  cancelar, alterar o catálogo e consultar o software instalado ao vivo exigem ADMIN ou
+  OPERATOR. O VIEWER só consulta, inclusive a última lista de software guardada.
 - **Auditoria.** O sistema registra quem cadastrou e quem alterou cada software, quem
   pediu e quem cancelou cada implantação, e o log de cada máquina.
 - **Segredos fora do repositório.** Só os `.env.example` são versionados. Os dados de
@@ -303,6 +312,12 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
 - **Desinstalação só para MSI, e por versão:** o ProductCode é o da versão cadastrada no
   catálogo. Se a máquina tiver outra versão do produto, o resultado é "não estava
   instalado"; para removê-la, cadastra-se o MSI dessa versão.
+- **Inventário:**
+  - **é uma foto:** a lista mostra o momento da consulta, com data e quem consultou;
+  - **programas instalados só para um usuário não aparecem:** eles ficam no perfil
+    desse usuário, e a sessão WinRM roda com a conta de serviço;
+  - **a marcação "no catálogo" vale só para MSI,** pelo ProductCode. Um EXE não tem
+    como ser comparado com segurança.
 - **Um EXE pode reiniciar a máquina por conta própria.** O sistema controla o reinício
   do MSI, mas não o de um instalador EXE que o force internamente.
 - **Fila e agendamento em memória, num único processo.** Com mais de uma instância do
@@ -313,9 +328,8 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
 
 ## Trabalhos futuros
 
-- **Inventário de software por máquina (RF08):** consulta ao vivo pelo WinRM
-  (`Get-Package` mais leitura do registro, já validados na prova de conceito),
-  reaproveitando a conexão da implantação.
+- **Busca por software em todas as máquinas** ("em quais máquinas está o X?"): exigiria
+  guardar o inventário item a item, e não só a última foto de cada máquina.
 - **Desinstalação de EXE:** exigiria descobrir, por família de instalador (Inno Setup,
   NSIS, InstallShield…), o desinstalador e os argumentos silenciosos de cada produto.
 - **Agente nas estações:** eliminaria a cópia pelo servidor, que limita a banda, e
