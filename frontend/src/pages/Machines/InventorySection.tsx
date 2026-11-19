@@ -169,7 +169,8 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
                   <span
                     className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[10px] ${item.productCode ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}
                   >
-                    {item.productCode ? 'MSI' : 'EXE'}
+                    {/* Sem ProductCode não dá para dizer o tipo (EXE, componente do Windows…). */}
+                    {item.productCode ? 'MSI' : 'Outro'}
                   </span>
                 </div>
                 {item.catalog && (
