@@ -6,9 +6,10 @@ import { MachinesModule } from './machines/machines.module';
 import { SoftwareModule } from './software/software.module';
 import { DeploymentsModule } from './deployments/deployments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, MachinesModule, SoftwareModule, DeploymentsModule, DashboardModule],
+  imports: [PrismaModule, AuthModule, MachinesModule, SoftwareModule, DeploymentsModule, DashboardModule, InventoryModule],
   controllers: [AppController],
 })
 export class AppModule {}

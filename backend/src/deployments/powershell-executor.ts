@@ -114,6 +114,12 @@ export interface PowerShellExecutorConfig {
   /** Executável e argumentos fixos. Em produção: powershell.exe -File deploy-target.ps1. */
   command: string;
   args: string[];
+  /** RF08: argumentos para o inventory-target.ps1 (padrão: os de cima, trocando o script). */
+  inventoryArgs?: string[];
+  /** RF08: limite geral do processo da consulta (padrão INVENTORY_WATCHDOG_MS). */
+  inventoryWatchdogMs?: number;
+  /** RF08: preenchido quando a consulta não pode rodar (ex.: script ausente). */
+  inventoryUnavailableReason?: string | null;
   /** null = identidade do próprio processo (produção, conta de serviço via Kerberos). */
   credential: WinRmCredential | null;
   connectTimeoutSeconds: number;
@@ -249,6 +255,92 @@ export class PowerShellExecutor {
       child.stdin.end(toAsciiJson(payload));
     });
   }
+
+  get isInventoryAvailable(): boolean {
+    return this.isAvailable && !this.config.inventoryUnavailableReason;
+  }
+
+  get inventoryUnavailableReason(): string | null {
+    return this.config.unavailableReason ?? this.config.inventoryUnavailableReason ?? null;
+  }
+
+  /**
+   * RF08: lê o software instalado numa máquina, ao vivo, com o script fixo
+   * inventory-target.ps1 (só leitura) — mesma credencial, mesmo powershell.exe e mesmo
+   * filtro de senha da implantação. Método à parte: o run() da implantação não muda.
+   * Nunca lança: tudo volta como resultado.
+   */
+  inventory(computerName: string): Promise<InventoryResult> {
+    if (!this.isInventoryAvailable) {
+      return Promise.resolve({ ok: false, reason: 'unavailable', message: this.inventoryUnavailableReason! });
+    }
+    const secrets = this.config.credential?.password ? [this.config.credential.password] : [];
+    const clean = (text: string) => truncate(redact(text, secrets), MAX_MESSAGE_LENGTH);
+    const args = this.config.inventoryArgs ?? this.config.args.map((a) => (a === DEPLOY_SCRIPT_PATH ? INVENTORY_SCRIPT_PATH : a));
+    const watchdogMs = this.config.inventoryWatchdogMs ?? INVENTORY_WATCHDOG_MS;
+
+    return new Promise<InventoryResult>((resolvePromise) => {
+      let settled = false;
+      let result: InventoryResult | null = null;
+      let stderr = '';
+      let watchdogFired = false;
+      const finish = (value: InventoryResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        resolvePromise(value);
+      };
+
+      const child = spawn(this.config.command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const watchdog = setTimeout(() => {
+        watchdogFired = true;
+        child.kill();
+      }, watchdogMs);
+
+      child.on('error', (err) => {
+        finish({ ok: false, reason: 'spawn-failed', message: clean(`Não foi possível iniciar o PowerShell: ${err.message}`) });
+      });
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        if (stderr.length < MAX_STDERR_LENGTH) stderr += chunk;
+      });
+      const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+      lines.on('line', (line) => {
+        if (result !== null || line.trim() === '') return;
+        const parsed = parseInventoryLine(line);
+        if (parsed) result = 'message' in parsed ? { ...parsed, message: clean(parsed.message) } : parsed;
+      });
+      child.on('close', (code) => {
+        if (watchdogFired) {
+          finish({
+            ok: false,
+            reason: 'watchdog-timeout',
+            message: `A consulta passou do limite geral (${Math.round(watchdogMs / 1000)} s) e foi encerrada.`,
+          });
+          return;
+        }
+        if (result !== null) {
+          finish(result);
+          return;
+        }
+        const detail = stderr.trim() ? `: ${stderr.trim()}` : '.';
+        finish({ ok: false, reason: 'no-result', message: clean(`O script de consulta terminou sem relatar resultado (código ${code})${detail}`) });
+      });
+
+      // A credencial só existe aqui e no stdin do processo filho. Nunca vai para log.
+      child.stdin.on('error', () => {
+        // O processo pode morrer antes de ler a entrada; o 'close' relata o resultado.
+      });
+      child.stdin.end(
+        toAsciiJson({
+          computerName,
+          connectTimeoutSeconds: this.config.connectTimeoutSeconds,
+          readTimeoutSeconds: INVENTORY_READ_TIMEOUT_SECONDS,
+          credential: this.config.credential,
+        }),
+      );
+    });
+  }
 }
 
 /**
@@ -286,6 +378,9 @@ export function loadPowerShellExecutorConfig(
   }
   if (!existsSync(command)) return unavailable(`PowerShell não encontrado em ${command}.`);
   if (!existsSync(scriptPath)) return unavailable(`script de implantação não encontrado em ${scriptPath}.`);
+  if (!existsSync(INVENTORY_SCRIPT_PATH)) {
+    base.inventoryUnavailableReason = `script de consulta não encontrado em ${INVENTORY_SCRIPT_PATH}.`;
+  }
 
   const username = env.WINRM_USERNAME?.trim() ?? '';
   const password = env.WINRM_PASSWORD ?? '';
@@ -302,6 +397,8 @@ export function loadPowerShellExecutorConfig(
 
 /** backend/scripts/deploy-target.ps1 — vale para src/ (ts-node, testes) e dist/. */
 export const DEPLOY_SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'deploy-target.ps1');
+/** RF08: backend/scripts/inventory-target.ps1 (só leitura). */
+export const INVENTORY_SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'inventory-target.ps1');
 
 export function parseInstallTimeoutMinutes(raw: string | undefined, logger?: Logger): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_INSTALL_TIMEOUT_MINUTES;
@@ -391,4 +488,100 @@ export function parseLine(line: string): ParsedLine | null {
     return { type: 'result', result: { ok: false, phase, reason, message: e.message } };
   }
   return null;
+}
+
+
+// ---------- RF08: inventário de software por máquina ----------
+
+/** Tempo limite da leitura na máquina (OperationTimeout da sessão WinRM). */
+export const INVENTORY_READ_TIMEOUT_SECONDS = 60;
+/** Limite geral do processo: conexão (30 s) + leitura (60 s) + margem. */
+export const INVENTORY_WATCHDOG_MS = 120_000;
+export const MAX_INVENTORY_ITEMS = 3000;
+const MAX_INVENTORY_TEXT = 256;
+
+export interface InventoryItem {
+  name: string;
+  version: string | null;
+  publisher: string | null;
+  /** aaaa-mm-dd, quando o instalador registrou. */
+  installDate: string | null;
+  /** Só MSI: o nome da subchave Uninstall ({GUID} em maiúsculas). */
+  productCode: string | null;
+  arch: '64' | '32';
+}
+
+export type InventoryFailureReason =
+  | 'invalid-input'
+  | 'dns'
+  | 'unreachable'
+  | 'winrm-refused'
+  | 'access-denied'
+  | 'not-trusted'
+  | 'session'
+  | 'timeout'
+  | 'read-failed'
+  | 'unexpected'
+  // Do lado do Node:
+  | 'unavailable'
+  | 'spawn-failed'
+  | 'watchdog-timeout'
+  | 'no-result';
+
+export type InventoryResult =
+  | { ok: true; items: InventoryItem[] }
+  | { ok: false; reason: InventoryFailureReason; message: string };
+
+/**
+ * Linha de resultado do inventory-target.ps1 → resultado validado. Logs e saída fora do
+ * protocolo viram null (ignorados). Os itens são normalizados aqui: textos aparados e
+ * truncados, ProductCode só no formato {GUID}, data só aaaa-mm-dd, sem repetição (o
+ * mesmo programa nas visões de 64 e 32 bits) e em ordem de nome, até MAX_INVENTORY_ITEMS.
+ */
+export function parseInventoryLine(line: string): InventoryResult | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const e = raw as Record<string, unknown>;
+  if (e.type !== 'result') return null;
+  if (e.ok === false && typeof e.message === 'string') {
+    const reason = typeof e.reason === 'string' ? (e.reason as InventoryFailureReason) : 'unexpected';
+    return { ok: false, reason, message: e.message };
+  }
+  if (e.ok !== true) return null;
+  return { ok: true, items: normalizeInventoryItems(Array.isArray(e.items) ? e.items : e.items ? [e.items] : []) };
+}
+
+export function normalizeInventoryItems(rawItems: unknown[]): InventoryItem[] {
+  const text = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null;
+    const t = v.trim();
+    return t === '' ? null : t.length > MAX_INVENTORY_TEXT ? t.slice(0, MAX_INVENTORY_TEXT) : t;
+  };
+  const byKey = new Map<string, InventoryItem>();
+  for (const r of rawItems) {
+    if (typeof r !== 'object' || r === null) continue;
+    const o = r as Record<string, unknown>;
+    const name = text(o.name);
+    if (!name) continue;
+    const code = typeof o.productCode === 'string' ? o.productCode.trim().toUpperCase() : '';
+    const date = typeof o.installDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.installDate) ? o.installDate : null;
+    const item: InventoryItem = {
+      name,
+      version: text(o.version),
+      publisher: text(o.publisher),
+      installDate: date,
+      productCode: PRODUCT_CODE.test(code) ? code : null,
+      arch: o.arch === '32' ? '32' : '64',
+    };
+    const key = `${item.name.toLowerCase()}|${item.version ?? ''}|${item.productCode ?? ''}`;
+    if (!byKey.has(key)) byKey.set(key, item);
+  }
+  return [...byKey.values()]
+    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR') || (a.version ?? '').localeCompare(b.version ?? ''))
+    .slice(0, MAX_INVENTORY_ITEMS);
 }
