@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useNavigate } from 'react-router-dom';
 import { RefreshIcon, SearchIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useNow } from '../../hooks/useNow';
 import { SessionExpiredError } from '../../services/apiClient';
 import { getSyncStatus, listMachines, syncMachines } from '../../services/machineService';
@@ -29,6 +30,9 @@ export function MachinesPage() {
   const { user } = useAuth();
   const canSync = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
   const now = useNow();
+  // Uma cópia só do painel (coluna em tela larga OU sobreposto): com o inventário (RF08),
+  // o painel tem estado — duas cópias montadas ficariam com listas diferentes.
+  const wide = useMediaQuery('(min-width: 1280px)');
   const navigate = useNavigate();
 
   const [data, setData] = useState<MachineListResponse | null>(null);
@@ -347,21 +351,21 @@ export function MachinesPage() {
       </div>
 
       {/* Painel de detalhes: coluna fixa em telas largas, sobreposto nas menores */}
-      {detailMachine && (
-        <>
-          <div className="hidden shrink-0 py-6 pr-6 xl:block">
+      {detailMachine &&
+        (wide ? (
+          <div className="shrink-0 py-6 pr-6">
             <div className="sticky top-6 h-[calc(100vh-7rem)]">
-              <MachineDetailsPanel machine={detailMachine} now={now} onClose={closeDetails} />
+              <MachineDetailsPanel machine={detailMachine} now={now} onClose={closeDetails} canCollect={canSync} />
             </div>
           </div>
-          <div className="fixed inset-0 z-30 xl:hidden">
+        ) : (
+          <div className="fixed inset-0 z-30">
             <div className="absolute inset-0 bg-slate-950/40" onClick={closeDetails} />
-            <div className="absolute inset-y-0 right-0 w-full max-w-sm shadow-xl">
-              <MachineDetailsPanel machine={detailMachine} now={now} onClose={closeDetails} />
+            <div className="absolute inset-y-0 right-0 w-full max-w-md shadow-xl">
+              <MachineDetailsPanel machine={detailMachine} now={now} onClose={closeDetails} canCollect={canSync} />
             </div>
           </div>
-        </>
-      )}
+        ))}
     </div>
   );
 }

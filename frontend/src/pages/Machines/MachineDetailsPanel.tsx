@@ -2,17 +2,20 @@ import { useEffect, type ReactNode } from 'react';
 import { XIcon } from '../../components/icons';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import type { Machine } from '../../types/machine';
+import { InventorySection } from './InventorySection';
 import { MissingFromAdBadge, StatusBadge } from './MachineBadges';
 
 interface MachineDetailsPanelProps {
   machine: Machine;
   now: number;
   onClose: () => void;
+  /** ADMIN/OPERATOR: consulta o software instalado ao vivo (RF08). */
+  canCollect: boolean;
 }
 
-// Só dado real: o que o AD fornece. IP, CPU/RAM/disco e software instalado não vêm
-// do AD — ver DECISIONS.md, recorte do mockup.
-export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPanelProps) {
+// Só dado real: o que o AD fornece e, sob demanda, o software instalado lido da própria
+// máquina (RF08). IP e CPU/RAM/disco não vêm do AD — ver DECISIONS.md, recorte do mockup.
+export function MachineDetailsPanel({ machine, now, onClose, canCollect }: MachineDetailsPanelProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -22,7 +25,7 @@ export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPan
   return (
     <aside
       aria-label={`Detalhes da máquina ${machine.hostname}`}
-      className="flex h-full w-full flex-col bg-white xl:w-80 xl:rounded-xl xl:border xl:border-slate-200 xl:shadow-sm"
+      className="flex h-full w-full flex-col bg-white xl:w-[26rem] xl:rounded-xl xl:border xl:border-slate-200 xl:shadow-sm"
     >
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
         <h2 className="text-sm font-semibold text-slate-900">Detalhes da máquina</h2>
@@ -63,6 +66,8 @@ export function MachineDetailsPanel({ machine, now, onClose }: MachineDetailsPan
             mas não pode ser selecionada para implantação.
           </p>
         )}
+
+        <InventorySection machine={machine} canCollect={canCollect} now={now} />
       </div>
     </aside>
   );

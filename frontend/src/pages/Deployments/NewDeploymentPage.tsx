@@ -18,6 +18,11 @@ import { Stepper, plural } from './wizardParts';
 /** A tela de Máquinas abre esta com as máquinas já marcadas (state da navegação). */
 export interface NewDeploymentLocationState {
   machineIds?: string[];
+  /** RF08: atalho "Desinstalar" do inventário — software e ação já escolhidos. */
+  softwareId?: string;
+  action?: DeploymentAction;
+  /** Abre no passo 3 (Revisar); a confirmação continua no passo 4. */
+  startAtReview?: boolean;
 }
 
 const MACHINES = 0;
@@ -42,12 +47,12 @@ export function NewDeploymentPage() {
   const [software, setSoftware] = useState<Software[] | null>(null);
   const [softwareError, setSoftwareError] = useState<string | null>(null);
 
-  const [step, setStep] = useState(MACHINES);
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set((location.state as NewDeploymentLocationState | null)?.machineIds ?? []),
-  );
-  const [action, setAction] = useState<DeploymentAction>('INSTALL');
-  const [softwareId, setSoftwareId] = useState<string | null>(null);
+  const initial = location.state as NewDeploymentLocationState | null;
+  const preset = Boolean(initial?.startAtReview && initial.softwareId && initial.machineIds?.length);
+  const [step, setStep] = useState(preset ? REVIEW : MACHINES);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(initial?.machineIds ?? []));
+  const [action, setAction] = useState<DeploymentAction>(initial?.action ?? 'INSTALL');
+  const [softwareId, setSoftwareId] = useState<string | null>(initial?.softwareId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [created, setCreated] = useState<Deployment | null>(null);
@@ -93,6 +98,19 @@ export function NewDeploymentPage() {
   );
   const chosen = software?.find((s) => s.id === softwareId) ?? null;
   const overLimit = selected.size > MAX_TARGETS_PER_DEPLOYMENT;
+
+  // Atalho do inventário (abre na revisão): quando as listas chegam, confere se a máquina
+  // e o software ainda valem; se não, volta ao passo em que a pessoa escolhe de novo.
+  const presetChecked = useRef(!preset);
+  useEffect(() => {
+    if (presetChecked.current || machines === null || software === null) return;
+    presetChecked.current = true;
+    if (selected.size === 0) setStep(MACHINES);
+    else if (!chosen || unavailableReason(chosen, action) !== null || (action === 'INSTALL' && !chosen.active)) {
+      setSoftwareId(null);
+      setStep(SOFTWARE);
+    }
+  }, [machines, software, selected, chosen, action]);
 
   const canAdvance =
     step === MACHINES
@@ -220,7 +238,12 @@ export function NewDeploymentPage() {
             onSelect={setSoftwareId}
           />
         )}
-        {step === REVIEW && chosen && <ReviewStep machines={selectedMachines} software={chosen} action={action} />}
+        {step === REVIEW && (machines === null || software === null) && (
+          <p className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500 shadow-sm">
+            Carregando…
+          </p>
+        )}
+        {step === REVIEW && chosen && machines !== null && <ReviewStep machines={selectedMachines} software={chosen} action={action} />}
         {step === EXECUTE && chosen && (
           <ConfirmStep machineCount={selectedMachines.length} software={chosen} action={action} error={submitError} />
         )}
