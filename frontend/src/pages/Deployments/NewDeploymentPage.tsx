@@ -3,16 +3,21 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircleIcon, ChevronLeftIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
-import { SessionExpiredError } from '../../services/apiClient';
+import { ApiError, SessionExpiredError } from '../../services/apiClient';
 import { createDeployment } from '../../services/deploymentService';
+import { collectInventory, getInventorySummary } from '../../services/inventoryService';
 import { listMachines } from '../../services/machineService';
 import { listSoftware } from '../../services/softwareService';
 import { MAX_TARGETS_PER_DEPLOYMENT, type Deployment, type DeploymentAction } from '../../types/deployment';
 import type { Machine } from '../../types/machine';
+import type { InventorySummary } from '../../types/inventory';
 import type { Software } from '../../types/software';
+import { deploymentTarget } from './deploymentUi';
 import { MachineStep } from './MachineStep';
 import { ConfirmStep, ReviewStep } from './ReviewStep';
 import { SoftwareStep, unavailableReason } from './SoftwareStep';
+import { UninstallChoices, type ConsultProgress } from './UninstallChoices';
+import { fromInventory, machinesToConsult, type UninstallTarget } from './uninstallTarget';
 import { Stepper, plural } from './wizardParts';
 
 /** A tela de Máquinas abre esta com as máquinas já marcadas (state da navegação). */
@@ -20,6 +25,8 @@ export interface NewDeploymentLocationState {
   machineIds?: string[];
   /** RF08: atalho "Desinstalar" do inventário — software e ação já escolhidos. */
   softwareId?: string;
+  /** Atalho "Desinstalar" do inventário: o MSI pelo ProductCode (pode estar fora do catálogo). */
+  productCode?: string;
   action?: DeploymentAction;
   /** Abre no passo 3 (Revisar); a confirmação continua no passo 4. */
   startAtReview?: boolean;
@@ -29,6 +36,13 @@ const MACHINES = 0;
 const SOFTWARE = 1;
 const REVIEW = 2;
 const EXECUTE = 3;
+
+/** "Consultar agora": consultas ao mesmo tempo (o limite do servidor) e espera no 429. */
+const CONSULT_PARALLEL = 5;
+const RETRY_429_MS = 2_000;
+const MAX_429_RETRIES = 30;
+const NO_CONSULT: ConsultProgress = { running: false, done: 0, total: 0, failures: [] };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : 'Erro inesperado.';
@@ -48,11 +62,18 @@ export function NewDeploymentPage() {
   const [softwareError, setSoftwareError] = useState<string | null>(null);
 
   const initial = location.state as NewDeploymentLocationState | null;
-  const preset = Boolean(initial?.startAtReview && initial.softwareId && initial.machineIds?.length);
+  const preset = Boolean(initial?.startAtReview && (initial.softwareId || initial.productCode) && initial.machineIds?.length);
+  const presetProductCode = initial?.startAtReview ? (initial.productCode ?? null) : null;
   const [step, setStep] = useState(preset ? REVIEW : MACHINES);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initial?.machineIds ?? []));
   const [action, setAction] = useState<DeploymentAction>(initial?.action ?? 'INSTALL');
   const [softwareId, setSoftwareId] = useState<string | null>(initial?.softwareId ?? null);
+  // Desinstalação: o que remover (do inventário ou do catálogo) e o inventário das máquinas.
+  const [uninstallTarget, setUninstallTarget] = useState<UninstallTarget | null>(null);
+  const [inventorySummary, setInventorySummary] = useState<InventorySummary | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [consult, setConsult] = useState<ConsultProgress>(NO_CONSULT);
+  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [created, setCreated] = useState<Deployment | null>(null);
@@ -98,39 +119,123 @@ export function NewDeploymentPage() {
   );
   const chosen = software?.find((s) => s.id === softwareId) ?? null;
   const overLimit = selected.size > MAX_TARGETS_PER_DEPLOYMENT;
+  const uninstall = action === 'UNINSTALL';
+  const selectedKey = [...selected].sort().join(',');
+
+  const loadSummary = useCallback(async () => {
+    const ids = selectedKey ? selectedKey.split(',') : [];
+    if (ids.length === 0) return;
+    try {
+      setInventorySummary(await getInventorySummary(ids));
+      setSummaryError(null);
+    } catch (err) {
+      if (!(err instanceof SessionExpiredError)) setSummaryError(messageOf(err));
+    }
+  }, [selectedKey]);
+
+  // Desinstalar: a lista vem do inventário das máquinas selecionadas (recarrega se mudarem).
+  useEffect(() => {
+    if (!uninstall || (step !== SOFTWARE && !presetProductCode)) return;
+    setInventorySummary(null);
+    void loadSummary();
+  }, [uninstall, step === SOFTWARE, loadSummary, presetProductCode]);
+
+  /** Consulta ao vivo as máquinas sem inventário ou com inventário antigo, até 5 de cada vez. */
+  async function consultNow() {
+    const queue = machinesToConsult(inventorySummary);
+    if (queue.length === 0 || consult.running) return;
+    const failures: ConsultProgress['failures'] = [];
+    const total = queue.length;
+    let done = 0;
+    setConsult({ running: true, done, total, failures });
+    const worker = async () => {
+      for (let m = queue.shift(); m; m = queue.shift()) {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await collectInventory(m.id);
+            break;
+          } catch (err) {
+            if (err instanceof SessionExpiredError) return;
+            // 429: o servidor já tem 5 consultas em andamento (de qualquer pessoa) — espera.
+            if (err instanceof ApiError && err.status === 429 && attempt < MAX_429_RETRIES) {
+              await sleep(RETRY_429_MS);
+              continue;
+            }
+            failures.push({ hostname: m.hostname, message: messageOf(err) });
+            break;
+          }
+        }
+        done += 1;
+        setConsult({ running: true, done, total, failures: [...failures] });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONSULT_PARALLEL, total) }, worker));
+    setConsult({ running: false, done, total, failures: [...failures] });
+    await loadSummary();
+  }
 
   // Atalho do inventário (abre na revisão): quando as listas chegam, confere se a máquina
-  // e o software ainda valem; se não, volta ao passo em que a pessoa escolhe de novo.
+  // e o software (ou o MSI do inventário) ainda valem; se não, volta ao passo da escolha.
   const presetChecked = useRef(!preset);
   useEffect(() => {
     if (presetChecked.current || machines === null || software === null) return;
+    if (presetProductCode && inventorySummary === null && summaryError === null) return; // espera o inventário
     presetChecked.current = true;
-    if (selected.size === 0) setStep(MACHINES);
-    else if (!chosen || unavailableReason(chosen, action) !== null || (action === 'INSTALL' && !chosen.active)) {
+    if (selected.size === 0) {
+      setStep(MACHINES);
+    } else if (presetProductCode) {
+      const group = inventorySummary?.products.find((p) => p.kind === 'MSI' && p.productCode === presetProductCode);
+      if (group) setUninstallTarget(fromInventory(group));
+      else setStep(SOFTWARE);
+    } else if (!chosen || unavailableReason(chosen, action) !== null || (action === 'INSTALL' && !chosen.active)) {
       setSoftwareId(null);
       setStep(SOFTWARE);
     }
-  }, [machines, software, selected, chosen, action]);
+  }, [machines, software, selected, chosen, action, presetProductCode, inventorySummary, summaryError]);
+
+  // Desinstalação: o que aparece no rodapé e na revisão.
+  const target = uninstall ? uninstallTarget : null;
+  const targetName = uninstall
+    ? target
+      ? `${target.name}${target.version ? ` ${target.version}` : ''}`
+      : null
+    : chosen
+      ? `${chosen.name} ${chosen.version}`
+      : null;
 
   const canAdvance =
     step === MACHINES
       ? selected.size > 0 && !overLimit
       : step === SOFTWARE
-        ? chosen !== null && unavailableReason(chosen, action) === null && (action === 'UNINSTALL' || chosen.active)
+        ? uninstall
+          ? uninstallTarget !== null
+          : chosen !== null && unavailableReason(chosen, action) === null && chosen.active
         : true;
 
   function changeAction(next: DeploymentAction) {
     setAction(next);
+    setUninstallTarget(null);
+    setConfirmed(false);
     // O software escolhido pode não valer para a outra ação (ex.: EXE ao desinstalar).
     if (chosen && (unavailableReason(chosen, next) !== null || (next === 'INSTALL' && !chosen.active))) setSoftwareId(null);
   }
 
   async function start() {
-    if (!chosen || submitting) return;
+    if (submitting || (uninstall ? !target : !chosen)) return;
+    if (target && !target.inCatalog && !confirmed) return;
     setSubmitting(true);
     setSubmitError(null);
+    const machineIds = selectedMachines.map((m) => m.id);
     try {
-      setCreated(await createDeployment({ action, softwareId: chosen.id, machineIds: selectedMachines.map((m) => m.id) }));
+      setCreated(
+        await createDeployment(
+          uninstall
+            ? target!.source === 'inventory'
+              ? { action, productCode: target!.productCode, machineIds }
+              : { action, softwareId: target!.softwareId!, machineIds }
+            : { action, softwareId: chosen!.id, machineIds },
+        ),
+      );
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setSubmitError(messageOf(err));
     } finally {
@@ -142,6 +247,9 @@ export function NewDeploymentPage() {
     setCreated(null);
     setSelected(new Set());
     setSoftwareId(null);
+    setUninstallTarget(null);
+    setConfirmed(false);
+    setConsult(NO_CONSULT);
     setAction('INSTALL');
     setSubmitError(null);
     setStep(MACHINES);
@@ -193,10 +301,10 @@ export function NewDeploymentPage() {
       </>
     );
   } else if (step === SOFTWARE) {
-    summary = chosen ? (
+    summary = targetName ? (
       <span className="font-semibold text-slate-900">
-        {action === 'UNINSTALL' && 'Desinstalar '}
-        {chosen.name} <span className="font-mono font-normal">{chosen.version}</span>
+        {uninstall && 'Desinstalar '}
+        {targetName}
         <span className="font-normal text-slate-500"> · {plural(selected.size, 'máquina', 'máquinas')}</span>
       </span>
     ) : (
@@ -205,8 +313,8 @@ export function NewDeploymentPage() {
   } else {
     summary = (
       <span className="font-semibold text-slate-900">
-        {action === 'UNINSTALL' && 'Desinstalar '}
-        {chosen?.name} <span className="font-mono font-normal">{chosen?.version}</span> →{' '}
+        {uninstall && 'Desinstalar '}
+        {targetName} →{' '}
         {plural(selectedMachines.length, 'máquina', 'máquinas')}
       </span>
     );
@@ -236,6 +344,20 @@ export function NewDeploymentPage() {
             onActionChange={changeAction}
             selectedId={softwareId}
             onSelect={setSoftwareId}
+            uninstallContent={
+              <UninstallChoices
+                summary={inventorySummary}
+                loadError={summaryError}
+                onRetry={loadSummary}
+                consult={consult}
+                onConsultNow={consultNow}
+                selectedKey={uninstallTarget?.key ?? null}
+                onSelect={(t) => {
+                  setUninstallTarget(t);
+                  setConfirmed(false);
+                }}
+              />
+            }
           />
         )}
         {step === REVIEW && (machines === null || software === null) && (
@@ -243,9 +365,19 @@ export function NewDeploymentPage() {
             Carregando…
           </p>
         )}
-        {step === REVIEW && chosen && machines !== null && <ReviewStep machines={selectedMachines} software={chosen} action={action} />}
-        {step === EXECUTE && chosen && (
-          <ConfirmStep machineCount={selectedMachines.length} software={chosen} action={action} error={submitError} />
+        {step === REVIEW && machines !== null && (uninstall ? target : chosen) && (
+          <ReviewStep machines={selectedMachines} software={chosen} action={action} uninstallTarget={target} />
+        )}
+        {step === EXECUTE && (uninstall ? target : chosen) && (
+          <ConfirmStep
+            machineCount={selectedMachines.length}
+            targetName={targetName ?? ''}
+            action={action}
+            error={submitError}
+            requireConfirm={target !== null && !target.inCatalog}
+            confirmed={confirmed}
+            onConfirm={setConfirmed}
+          />
         )}
       </div>
 
@@ -292,7 +424,7 @@ export function NewDeploymentPage() {
             <button
               type="button"
               onClick={start}
-              disabled={submitting}
+              disabled={submitting || (target !== null && !target.inCatalog && !confirmed)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <PlayIcon className="h-4 w-4" />
@@ -317,7 +449,7 @@ function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRest
       </p>
       <p className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
         <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-600" />
-        {deployment.software.name} <span className="font-mono">{deployment.software.version}</span> →{' '}
+        {deploymentTarget(deployment).name} <span className="font-mono">{deploymentTarget(deployment).version}</span> →{' '}
         {plural(count, 'máquina', 'máquinas')}
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">

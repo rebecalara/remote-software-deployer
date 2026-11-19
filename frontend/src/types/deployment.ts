@@ -42,7 +42,10 @@ export interface DeploymentSummary {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
-  software: { id: string; name: string; version: string; installType: InstallType };
+  /** null = desinstalação de um MSI fora do catálogo (ver `product`). */
+  software: { id: string; name: string; version: string; installType: InstallType } | null;
+  /** Desinstalação: o produto removido (cópia do momento da criação). */
+  product: { productCode: string; name: string; version: string | null; publisher: string | null } | null;
   requestedBy: { username: string; displayName: string | null };
   counts: DeploymentCounts;
 }
@@ -54,7 +57,10 @@ export interface Deployment extends DeploymentSummary {
 export interface DeploymentCreateInput {
   /** Ausente = INSTALL. */
   action?: DeploymentAction;
-  softwareId: string;
+  /** Software do catálogo. Na desinstalação, ou ele ou o productCode. */
+  softwareId?: string;
+  /** Só desinstalação: MSI escolhido pelo inventário guardado das máquinas. */
+  productCode?: string;
   machineIds: string[];
   name?: string;
 }
@@ -113,6 +119,8 @@ export interface DashboardActivity {
   total?: number;
   softwareName: string;
   softwareVersion: string;
+  /** false = produto fora do catálogo (desinstalação pelo inventário). */
+  inCatalog?: boolean;
 }
 
 export interface SystemCheck {

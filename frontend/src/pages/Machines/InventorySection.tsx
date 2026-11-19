@@ -7,6 +7,7 @@ import type { InventoryItem, InventoryState } from '../../types/inventory';
 import type { Machine } from '../../types/machine';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import type { NewDeploymentLocationState } from '../Deployments/NewDeploymentPage';
+import { OutsideCatalogBadge } from '../Deployments/deploymentUi';
 
 // RF08: software instalado na máquina. A consulta é AO VIVO pelo WinRM (só leitura, só
 // ADMIN/OPERATOR) e a última consulta bem-sucedida fica guardada, com data e quem
@@ -75,12 +76,13 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
         ? 'A máquina não apareceu na última sincronização com o AD.'
         : null;
 
+  /** Atalho para qualquer MSI (do catálogo ou não): vai pelo ProductCode do inventário. */
   function uninstall(item: InventoryItem) {
-    if (!item.catalog) return;
+    if (!item.productCode) return;
     navigate('/deployments/new', {
       state: {
         machineIds: [machine.id],
-        softwareId: item.catalog.softwareId,
+        productCode: item.productCode,
         action: 'UNINSTALL',
         startAtReview: true,
       } satisfies NewDeploymentLocationState,
@@ -173,16 +175,20 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
                     {item.productCode ? 'MSI' : 'Outro'}
                   </span>
                 </div>
-                {item.catalog && (
+                {item.productCode && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span
-                      className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800"
-                      data-testid="catalog-badge"
-                    >
-                      No catálogo: {item.catalog.name} {item.catalog.version}
-                      {!item.catalog.active && ' (desativado)'}
-                    </span>
-                    {canCollect && machine.seenInLastSync && item.catalog.uninstallAvailable && (
+                    {item.catalog ? (
+                      <span
+                        className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800"
+                        data-testid="catalog-badge"
+                      >
+                        No catálogo: {item.catalog.name} {item.catalog.version}
+                        {!item.catalog.active && ' (desativado)'}
+                      </span>
+                    ) : (
+                      <OutsideCatalogBadge />
+                    )}
+                    {canCollect && machine.seenInLastSync && (
                       <button
                         type="button"
                         onClick={() => uninstall(item)}

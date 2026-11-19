@@ -197,6 +197,7 @@ export function HistoryPage() {
           Software
           <select value={softwareId} onChange={(e) => update({ softwareId: e.target.value })} className={input} aria-label="Software">
             <option value="">Todos</option>
+            <option value="none">Fora do catálogo</option>
             {software.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} {s.version}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { CheckCircleIcon, SearchIcon } from '../../components/icons';
 import type { DeploymentAction } from '../../types/deployment';
 import type { Software } from '../../types/software';
@@ -15,6 +15,8 @@ interface SoftwareStepProps {
   onActionChange: (action: DeploymentAction) => void;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Em "Desinstalar": a lista do software instalado nas máquinas (UninstallChoices). */
+  uninstallContent?: ReactNode;
 }
 
 /** Por que um software não pode ser escolhido nesta ação (null = pode). */
@@ -36,7 +38,16 @@ export function unavailableReason(s: Software, action: DeploymentAction): { badg
  * desativados (desativar no catálogo costuma ser o momento de remover das máquinas); os
  * EXE aparecem, com a explicação de por que não há desinstalação.
  */
-export function SoftwareStep({ software, loadError, onRetry, action, onActionChange, selectedId, onSelect }: SoftwareStepProps) {
+export function SoftwareStep({
+  software,
+  loadError,
+  onRetry,
+  action,
+  onActionChange,
+  selectedId,
+  onSelect,
+  uninstallContent,
+}: SoftwareStepProps) {
   const [search, setSearch] = useState('');
   const uninstall = action === 'UNINSTALL';
 
@@ -57,7 +68,11 @@ export function SoftwareStep({ software, loadError, onRetry, action, onActionCha
   return (
     <StepCard
       title={uninstall ? 'Selecionar software para desinstalar' : 'Selecionar software para implantar'}
-      subtitle={uninstall ? 'Escolha o MSI a remover das máquinas selecionadas.' : 'Escolha um software do catálogo.'}
+      subtitle={
+        uninstall
+          ? 'Escolha um MSI instalado nas máquinas selecionadas, segundo o inventário de cada uma.'
+          : 'Escolha um software do catálogo.'
+      }
     >
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3 sm:px-6">
         <div role="radiogroup" aria-label="Ação" className="inline-flex rounded-lg bg-slate-100 p-1">
@@ -76,7 +91,7 @@ export function SoftwareStep({ software, loadError, onRetry, action, onActionCha
             </button>
           ))}
         </div>
-        <label className="relative min-w-56 flex-1 sm:max-w-md">
+        <label className={`relative min-w-56 flex-1 sm:max-w-md ${uninstall ? 'hidden' : ''}`}>
           <span className="sr-only">Buscar software</span>
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
@@ -89,13 +104,9 @@ export function SoftwareStep({ software, loadError, onRetry, action, onActionCha
         </label>
       </div>
 
-      {uninstall && (
-        <p data-testid="uninstall-note" className="mx-4 mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700 sm:mx-6">
-          {EXE_UNINSTALL_UNAVAILABLE}
-        </p>
-      )}
-
-      {loadError ? (
+      {uninstall ? (
+        uninstallContent
+      ) : loadError ? (
         <EmptyState title="Não foi possível carregar o catálogo." detail={loadError}>
           <button type="button" onClick={onRetry} className="text-sm font-medium text-blue-700 hover:underline">
             Tentar de novo

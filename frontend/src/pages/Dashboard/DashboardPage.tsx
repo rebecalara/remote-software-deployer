@@ -7,7 +7,7 @@ import { SessionExpiredError } from '../../services/apiClient';
 import { getDashboard, listDeployments } from '../../services/deploymentService';
 import type { DashboardActivity, DashboardData, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime, formatRelative } from '../../utils/format';
-import { ActionBadge, Counter, StatusBadge } from '../Deployments/deploymentUi';
+import { ActionBadge, Counter, OutsideCatalogBadge, StatusBadge, deploymentTarget } from '../Deployments/deploymentUi';
 
 // Dashboard (tela inicial): resumo SÓ com dado real, a partir do mockup do Portfólio
 // (recorte no DECISIONS.md). Monitoramento e Histórico são telas separadas.
@@ -219,13 +219,18 @@ export function DashboardPage() {
                   <tr key={d.id} className="hover:bg-slate-50">
                     <td className="px-4 py-2.5">
                       <Link to={`/deployments/${d.id}`} className="font-medium text-slate-900 hover:text-blue-700 hover:underline">
-                        {d.software.name}
+                        {deploymentTarget(d).name}
                       </Link>
+                      {!deploymentTarget(d).inCatalog && (
+                        <span className="ml-1.5">
+                          <OutsideCatalogBadge />
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <ActionBadge action={d.action} />
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-[13px] text-slate-600">{d.software.version}</td>
+                    <td className="px-4 py-2.5 font-mono text-[13px] text-slate-600">{deploymentTarget(d).version ?? '—'}</td>
                     <td className="px-4 py-2.5 text-slate-600">{d.counts.total}</td>
                     <td className="px-4 py-2.5 font-medium">
                       <span className="text-emerald-700">{d.counts.succeeded}</span>
@@ -269,7 +274,7 @@ function DeploymentLabel({ status, succeeded }: { status: DeploymentSummary['sta
 const DOT = { green: 'bg-emerald-500', red: 'bg-red-500', amber: 'bg-amber-500', blue: 'bg-blue-500', slate: 'bg-slate-400' };
 
 function activityText(a: DashboardActivity): { text: string; dot: keyof typeof DOT } {
-  const sw = `${a.softwareName} ${a.softwareVersion}`;
+  const sw = `${a.softwareName}${a.softwareVersion ? ` ${a.softwareVersion}` : ''}${a.inCatalog === false ? ' (fora do catálogo)' : ''}`;
   if (a.kind === 'software') return { text: `${sw} adicionado ao catálogo`, dot: 'blue' };
   const total = a.total ?? 0;
   const machines = `${total} ${total === 1 ? 'máquina' : 'máquinas'}`;

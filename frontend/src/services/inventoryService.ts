@@ -1,5 +1,10 @@
 import { apiFetch } from './apiClient';
-import type { InventoryState, MachineInventory } from '../types/inventory';
+import type { InventoryState, InventorySummary, MachineInventory } from '../types/inventory';
+
+/** Desinstalação pelo inventário: software das máquinas selecionadas, agrupado (só leitura). */
+export function getInventorySummary(machineIds: string[]): Promise<InventorySummary> {
+  return apiFetch<InventorySummary>('/machines/inventory-summary', { method: 'POST', body: { machineIds } });
+}
 
 /** Última consulta guardada (ou null) e se a consulta ao vivo está disponível. Qualquer perfil. */
 export function getInventory(machineId: string): Promise<InventoryState> {

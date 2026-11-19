@@ -1,4 +1,4 @@
-import type { DeploymentAction, DeploymentCounts, DeploymentStatus } from '../../types/deployment';
+import type { DeploymentAction, DeploymentCounts, DeploymentStatus, DeploymentSummary } from '../../types/deployment';
 
 // Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
 // pelo Histórico.
@@ -93,6 +93,25 @@ export function durationText(startIso: string | null, endIso: string | null, now
   if (!startIso) return '—';
   const end = endIso ? new Date(endIso).getTime() : running ? now : null;
   return end === null ? '—' : formatDuration(end - new Date(startIso).getTime());
+}
+
+/** O que a implantação instala ou remove: software do catálogo ou, fora dele, o produto. */
+export function deploymentTarget(d: Pick<DeploymentSummary, 'software' | 'product'>): {
+  name: string;
+  version: string | null;
+  inCatalog: boolean;
+} {
+  if (d.software) return { name: d.software.name, version: d.software.version, inCatalog: true };
+  return { name: d.product?.name ?? '—', version: d.product?.version ?? null, inCatalog: false };
+}
+
+/** Selo para produto desinstalado que não está no catálogo. */
+export function OutsideCatalogBadge() {
+  return (
+    <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-amber-800">
+      Fora do catálogo
+    </span>
+  );
 }
 
 /** Selo "Instalação" / "Desinstalação" (Monitoramento, Histórico, Dashboard). */

@@ -5,18 +5,24 @@ import type { Machine } from '../../types/machine';
 import type { Software } from '../../types/software';
 import { formatBytes } from '../../utils/format';
 import { MissingFromAdBadge, StatusBadge } from '../Machines/MachineBadges';
+import { OutsideCatalogBadge } from './deploymentUi';
 import { REMOTE_DIR, commandText, uninstallCommandText } from './installCommand';
+import type { UninstallTarget } from './uninstallTarget';
 import { StepCard, TypeBadge, plural } from './wizardParts';
 
 interface ReviewProps {
   machines: Machine[];
-  software: Software;
+  /** Instalação: o software do catálogo. */
+  software: Software | null;
   action: DeploymentAction;
+  /** Desinstalação: o MSI escolhido (do inventário ou do catálogo). */
+  uninstallTarget: UninstallTarget | null;
 }
 
 /** Passo 3: o que vai rodar, onde e como — com o comando exato. */
-export function ReviewStep({ machines, software, action }: ReviewProps) {
-  if (action === 'UNINSTALL') return <UninstallReview machines={machines} software={software} />;
+export function ReviewStep({ machines, software: maybeSoftware, action, uninstallTarget }: ReviewProps) {
+  if (action === 'UNINSTALL') return <UninstallReview machines={machines} target={uninstallTarget!} />;
+  const software = maybeSoftware!;
   const size = software.installer?.sizeBytes ?? null;
   return (
     <div className="space-y-4">
@@ -108,7 +114,8 @@ function MachineList({ machines }: { machines: Machine[] }) {
 }
 
 /** Revisão da desinstalação (só MSI): nada é copiado; só o ProductCode vai para a máquina. */
-function UninstallReview({ machines, software }: { machines: Machine[]; software: Software }) {
+function UninstallReview({ machines, target }: { machines: Machine[]; target: UninstallTarget }) {
+  const others = target.machinesWith === null ? null : machines.length - target.machinesWith;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -116,19 +123,48 @@ function UninstallReview({ machines, software }: { machines: Machine[]; software
 
         <StepCard title="Software a desinstalar">
           <dl className="space-y-3 px-4 py-4 text-sm sm:px-6">
-            <div className="flex items-center gap-3">
-              <TypeBadge type={software.installType} />
-              <span className="font-semibold text-slate-900">{software.name}</span>
-              <span className="font-mono text-slate-600">{software.version}</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <TypeBadge type="MSI" />
+              <span className="font-semibold text-slate-900">{target.name}</span>
+              {target.version && <span className="font-mono text-slate-600">{target.version}</span>}
+              {!target.inCatalog && <OutsideCatalogBadge />}
             </div>
-            <Field label="Fabricante">{software.vendor ?? '—'}</Field>
+            <Field label="Fabricante">{target.publisher ?? '—'}</Field>
             <Field label="ProductCode">
-              <span className="font-mono text-xs break-all text-slate-700">{software.msiProductCode ?? '—'}</span>
+              <span className="font-mono text-xs break-all text-slate-700">{target.productCode}</span>
             </Field>
-            <Field label="No catálogo">{software.active ? 'Ativo' : 'Desativado (a desinstalação continua permitida)'}</Field>
+            <Field label="No catálogo">
+              {target.catalogActive === null
+                ? 'Não cadastrado'
+                : target.catalogActive
+                  ? 'Ativo'
+                  : 'Desativado (a desinstalação continua permitida)'}
+            </Field>
+            <Field label="Nas máquinas">
+              <span data-testid="coverage">
+                {target.machinesWith === null
+                  ? 'Nenhum inventário das máquinas selecionadas encontrou o produto.'
+                  : `Segundo o inventário, ${target.machinesWith} de ${plural(machines.length, 'máquina', 'máquinas')}${
+                      others === 1
+                        ? '; a outra deve terminar como "não estava instalado"'
+                        : others
+                          ? `; as outras ${others} devem terminar como "não estava instalado"`
+                          : ''
+                    }.`}
+              </span>
+            </Field>
           </dl>
         </StepCard>
       </div>
+
+      {!target.inCatalog && (
+        <Notice tone="amber" icon={<AlertTriangleIcon className="h-4 w-4" />}>
+          <span data-testid="outside-catalog-warning">
+            Este produto não foi cadastrado no catálogo. Confira se ele pode ser removido destas máquinas (ex.: antivírus,
+            agentes de gerenciamento, bibliotecas usadas por outros programas).
+          </span>
+        </Notice>
+      )}
 
       <StepCard title="Como a desinstalação vai rodar em cada máquina">
         <div className="space-y-4 px-4 py-4 text-sm sm:px-6">
@@ -138,11 +174,13 @@ function UninstallReview({ machines, software }: { machines: Machine[]; software
               data-testid="install-command"
               className="overflow-x-auto rounded-lg bg-slate-900 px-4 py-3 font-mono text-[13px] whitespace-pre-wrap break-all text-slate-100"
             >
-              {uninstallCommandText(software)}
+              {uninstallCommandText({ msiProductCode: target.productCode })}
             </pre>
             <p className="mt-1.5 text-xs text-slate-500">
-              O ProductCode foi lido pelo servidor do próprio pacote MSI, no envio. Nenhum argumento do catálogo é usado,
-              e REBOOT=ReallySuppress vai sempre por último.
+              {target.source === 'inventory'
+                ? 'O ProductCode vem do software instalado lido das máquinas (inventário guardado). '
+                : 'O ProductCode foi lido pelo servidor do próprio pacote MSI, no envio. '}
+              Nenhum argumento do catálogo é usado, e REBOOT=ReallySuppress vai sempre por último.
             </p>
           </div>
 
@@ -166,7 +204,8 @@ function UninstallReview({ machines, software }: { machines: Machine[]; software
           </div>
 
           <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-blue-900">
-            <strong>Resumo:</strong> {software.name} {software.version} será desinstalado de{' '}
+            <strong>Resumo:</strong> {target.name}
+            {target.version ? ` ${target.version}` : ''} será desinstalado de{' '}
             {plural(machines.length, 'máquina', 'máquinas')}.
           </p>
         </div>
@@ -177,13 +216,18 @@ function UninstallReview({ machines, software }: { machines: Machine[]; software
 
 interface ConfirmProps {
   machineCount: number;
-  software: Software;
+  /** "7-Zip 26.06" — o software ou o produto. */
+  targetName: string;
   action: DeploymentAction;
   error: string | null;
+  /** Produto fora do catálogo: o botão só libera depois de marcar a confirmação. */
+  requireConfirm: boolean;
+  confirmed: boolean;
+  onConfirm: (value: boolean) => void;
 }
 
 /** Passo 4: confirmação. O botão "Iniciar …" fica na barra fixa do rodapé. */
-export function ConfirmStep({ machineCount, software, action, error }: ConfirmProps) {
+export function ConfirmStep({ machineCount, targetName, action, error, requireConfirm, confirmed, onConfirm }: ConfirmProps) {
   const uninstall = action === 'UNINSTALL';
   return (
     <section className="rounded-xl border border-slate-200 bg-white px-4 py-8 shadow-sm sm:px-6">
@@ -197,9 +241,7 @@ export function ConfirmStep({ machineCount, software, action, error }: ConfirmPr
 
         <dl className="mt-6 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-slate-50 text-left text-sm">
           <Row label="Máquinas de destino">{machineCount}</Row>
-          <Row label="Software">
-            {software.name} <span className="font-mono">{software.version}</span>
-          </Row>
+          <Row label="Software">{targetName}</Row>
           <Row label={uninstall ? 'Desinstalações (uma por máquina)' : 'Instalações (uma por máquina)'}>{machineCount}</Row>
           <Row label="Início">Imediato, em segundo plano</Row>
         </dl>
@@ -211,6 +253,22 @@ export function ConfirmStep({ machineCount, software, action, error }: ConfirmPr
               : 'Esta ação inicia as instalações imediatamente, como administrador. Confira se as máquinas podem receber a instalação agora. Máquinas desligadas ou fora da rede ficam registradas como falha.'}
           </Notice>
         </div>
+
+        {requireConfirm && (
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left text-sm text-amber-900">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => onConfirm(e.target.checked)}
+              className="mt-0.5"
+              data-testid="confirm-outside-catalog"
+            />
+            <span>
+              <strong>Confirmo que este produto pode ser removido</strong> das máquinas selecionadas. Ele não está no
+              catálogo do sistema.
+            </span>
+          </label>
+        )}
 
         {error && (
           <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2.5 text-left text-sm text-red-700">
