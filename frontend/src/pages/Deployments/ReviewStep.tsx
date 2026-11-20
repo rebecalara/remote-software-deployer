@@ -5,7 +5,7 @@ import type { Machine } from '../../types/machine';
 import type { Software } from '../../types/software';
 import { formatBytes } from '../../utils/format';
 import { MissingFromAdBadge, StatusBadge } from '../Machines/MachineBadges';
-import { OutsideCatalogBadge } from './deploymentUi';
+import { OutsideCatalogBadge, VendorBadge } from './deploymentUi';
 import { REMOTE_DIR, commandText, uninstallCommandText } from './installCommand';
 import type { UninstallTarget } from './uninstallTarget';
 import { StepCard, TypeBadge, plural } from './wizardParts';
@@ -116,6 +116,7 @@ function MachineList({ machines }: { machines: Machine[] }) {
 /** Revisão da desinstalação (só MSI): nada é copiado; só o ProductCode vai para a máquina. */
 function UninstallReview({ machines, target }: { machines: Machine[]; target: UninstallTarget }) {
   const others = machines.length - target.machinesWith;
+  const vendor = target.method === 'VENDOR';
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -124,15 +125,21 @@ function UninstallReview({ machines, target }: { machines: Machine[]; target: Un
         <StepCard title="Software a desinstalar">
           <dl className="space-y-3 px-4 py-4 text-sm sm:px-6">
             <div className="flex flex-wrap items-center gap-3">
-              <TypeBadge type="MSI" />
+              {vendor ? (
+                <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-500">Outro</span>
+              ) : (
+                <TypeBadge type="MSI" />
+              )}
               <span className="font-semibold text-slate-900">{target.name}</span>
               {target.version && <span className="font-mono text-slate-600">{target.version}</span>}
-              {!target.inCatalog && <OutsideCatalogBadge />}
+              {vendor ? <VendorBadge /> : !target.inCatalog && <OutsideCatalogBadge />}
             </div>
             <Field label="Fabricante">{target.publisher ?? '—'}</Field>
-            <Field label="ProductCode">
-              <span className="font-mono text-xs break-all text-slate-700">{target.productCode}</span>
-            </Field>
+            {!vendor && (
+              <Field label="ProductCode">
+                <span className="font-mono text-xs break-all text-slate-700">{target.productCode}</span>
+              </Field>
+            )}
             <Field label="No catálogo">
               {target.catalogActive === null
                 ? 'Não cadastrado'
@@ -155,7 +162,17 @@ function UninstallReview({ machines, target }: { machines: Machine[]; target: Un
         </StepCard>
       </div>
 
-      {!target.inCatalog && (
+      {vendor && (
+        <Notice tone="amber" icon={<AlertTriangleIcon className="h-4 w-4" />}>
+          <span data-testid="vendor-warning">
+            <strong>Este comando é do fabricante do programa, não do sistema.</strong> Ele pode reiniciar a máquina sem
+            aviso, e o sistema não tem como impedir. Se ele tentar abrir uma janela, ninguém a verá (roda sem área de
+            trabalho) e ele será encerrado no tempo limite.
+          </span>
+        </Notice>
+      )}
+
+      {!vendor && !target.inCatalog && (
         <Notice tone="amber" icon={<AlertTriangleIcon className="h-4 w-4" />}>
           <span data-testid="outside-catalog-warning">
             Este produto não foi cadastrado no catálogo. Confira se ele pode ser removido destas máquinas (ex.: antivírus,
@@ -172,31 +189,47 @@ function UninstallReview({ machines, target }: { machines: Machine[]; target: Un
               data-testid="install-command"
               className="overflow-x-auto rounded-lg bg-slate-900 px-4 py-3 font-mono text-[13px] whitespace-pre-wrap break-all text-slate-100"
             >
-              {uninstallCommandText({ msiProductCode: target.productCode })}
+              {vendor ? target.command : uninstallCommandText({ msiProductCode: target.productCode })}
             </pre>
             <p className="mt-1.5 text-xs text-slate-500">
-              O ProductCode vem do software instalado lido das máquinas (inventário guardado).{' '}
-              Nenhum argumento do catálogo é usado, e REBOOT=ReallySuppress vai sempre por último.
+              {vendor
+                ? 'Comando silencioso declarado pelo próprio programa no registro (QuietUninstallString), lido no inventário guardado e conferido pelas regras do sistema.'
+                : 'O ProductCode vem do software instalado lido das máquinas (inventário guardado). Nenhum argumento do catálogo é usado, e REBOOT=ReallySuppress vai sempre por último.'}
             </p>
           </div>
 
-          <ol className="list-decimal space-y-1 pl-5 text-slate-600">
-            <li>Conecta à máquina pelo WinRM. Nada é copiado para a máquina.</li>
-            <li>
-              Confere se o produto (ProductCode) está instalado; se não estiver, não executa nada e registra "não estava
-              instalado".
-            </li>
-            <li>Executa o comando acima e registra o código de saída.</li>
-          </ol>
+          {vendor ? (
+            <ol className="list-decimal space-y-1 pl-5 text-slate-600">
+              <li>Conecta à máquina pelo WinRM. Nada é copiado para a máquina.</li>
+              <li>
+                Relê o comando no registro da máquina: se o programa não estiver mais lá, registra "não estava
+                instalado"; se o comando mudou desde a consulta, não executa nada.
+              </li>
+              <li>Confere o comando e o executável (Program Files, sem atalhos) e registra a assinatura digital.</li>
+              <li>Executa o comando acima, com tempo limite.</li>
+              <li>Sucesso = o programa saiu do registro da máquina (espera até 2 minutos), qualquer que seja o código de saída.</li>
+            </ol>
+          ) : (
+            <ol className="list-decimal space-y-1 pl-5 text-slate-600">
+              <li>Conecta à máquina pelo WinRM. Nada é copiado para a máquina.</li>
+              <li>
+                Confere se o produto (ProductCode) está instalado; se não estiver, não executa nada e registra "não estava
+                instalado".
+              </li>
+              <li>Executa o comando acima e registra o código de saída.</li>
+            </ol>
+          )}
 
           <div className="space-y-2">
             <Notice tone="amber">
               O produto é <strong>removido</strong> das máquinas selecionadas, com o comando executado como administrador.
             </Notice>
-            <Notice tone="blue">
-              O sistema <strong>nunca reinicia as máquinas</strong>. Se a desinstalação pedir reinício, ela é registrada
-              com o aviso "reinício pendente".
-            </Notice>
+            {!vendor && (
+              <Notice tone="blue">
+                O sistema <strong>nunca reinicia as máquinas</strong>. Se a desinstalação pedir reinício, ela é registrada
+                com o aviso "reinício pendente".
+              </Notice>
+            )}
           </div>
 
           <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-blue-900">
@@ -218,12 +251,14 @@ interface ConfirmProps {
   error: string | null;
   /** Produto fora do catálogo: o botão só libera depois de marcar a confirmação. */
   requireConfirm: boolean;
+  /** Comando do fabricante: o texto da confirmação fala do comando. */
+  vendor?: boolean;
   confirmed: boolean;
   onConfirm: (value: boolean) => void;
 }
 
 /** Passo 4: confirmação. O botão "Iniciar …" fica na barra fixa do rodapé. */
-export function ConfirmStep({ machineCount, targetName, action, error, requireConfirm, confirmed, onConfirm }: ConfirmProps) {
+export function ConfirmStep({ machineCount, targetName, action, error, requireConfirm, vendor, confirmed, onConfirm }: ConfirmProps) {
   const uninstall = action === 'UNINSTALL';
   return (
     <section className="rounded-xl border border-slate-200 bg-white px-4 py-8 shadow-sm sm:px-6">
@@ -260,8 +295,17 @@ export function ConfirmStep({ machineCount, targetName, action, error, requireCo
               data-testid="confirm-outside-catalog"
             />
             <span>
-              <strong>Confirmo que este produto pode ser removido</strong> das máquinas selecionadas. Ele não está no
-              catálogo do sistema.
+              {vendor ? (
+                <>
+                  <strong>Confirmo a execução do comando do fabricante</strong> nas máquinas selecionadas, ciente de que
+                  ele pode reiniciar a máquina sem aviso.
+                </>
+              ) : (
+                <>
+                  <strong>Confirmo que este produto pode ser removido</strong> das máquinas selecionadas. Ele não está no
+                  catálogo do sistema.
+                </>
+              )}
             </span>
           </label>
         )}

@@ -27,6 +27,8 @@ export interface NewDeploymentLocationState {
   softwareId?: string;
   /** Atalho "Desinstalar" do inventário: o MSI pelo ProductCode (pode estar fora do catálogo). */
   productCode?: string;
+  /** Atalho "Desinstalar" do inventário: programa (não MSI) pelo comando do fabricante. */
+  programId?: string;
   action?: DeploymentAction;
   /** Abre no passo 3 (Revisar); a confirmação continua no passo 4. */
   startAtReview?: boolean;
@@ -43,6 +45,8 @@ const RETRY_429_MS = 2_000;
 const MAX_429_RETRIES = 30;
 const NO_CONSULT: ConsultProgress = { running: false, done: 0, total: 0, failures: [] };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Confirmação obrigatória: produto fora do catálogo ou comando do fabricante. */
+const needsConfirm = (t: UninstallTarget) => t.method === 'VENDOR' || !t.inCatalog;
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : 'Erro inesperado.';
@@ -62,8 +66,12 @@ export function NewDeploymentPage() {
   const [softwareError, setSoftwareError] = useState<string | null>(null);
 
   const initial = location.state as NewDeploymentLocationState | null;
-  const preset = Boolean(initial?.startAtReview && (initial.softwareId || initial.productCode) && initial.machineIds?.length);
+  const preset = Boolean(
+    initial?.startAtReview && (initial.softwareId || initial.productCode || initial.programId) && initial.machineIds?.length,
+  );
   const presetProductCode = initial?.startAtReview ? (initial.productCode ?? null) : null;
+  const presetProgramId = initial?.startAtReview ? (initial.programId ?? null) : null;
+  const presetFromInventory = presetProductCode ?? presetProgramId;
   const [step, setStep] = useState(preset ? REVIEW : MACHINES);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initial?.machineIds ?? []));
   const [action, setAction] = useState<DeploymentAction>(initial?.action ?? 'INSTALL');
@@ -135,10 +143,10 @@ export function NewDeploymentPage() {
 
   // Desinstalar: a lista vem do inventário das máquinas selecionadas (recarrega se mudarem).
   useEffect(() => {
-    if (!uninstall || (step !== SOFTWARE && !presetProductCode)) return;
+    if (!uninstall || (step !== SOFTWARE && !presetFromInventory)) return;
     setInventorySummary(null);
     void loadSummary();
-  }, [uninstall, step === SOFTWARE, loadSummary, presetProductCode]);
+  }, [uninstall, step === SOFTWARE, loadSummary, presetFromInventory]);
 
   /** Consulta ao vivo as máquinas sem inventário ou com inventário antigo, até 5 de cada vez. */
   async function consultNow() {
@@ -179,19 +187,23 @@ export function NewDeploymentPage() {
   const presetChecked = useRef(!preset);
   useEffect(() => {
     if (presetChecked.current || machines === null || software === null) return;
-    if (presetProductCode && inventorySummary === null && summaryError === null) return; // espera o inventário
+    if (presetFromInventory && inventorySummary === null && summaryError === null) return; // espera o inventário
     presetChecked.current = true;
     if (selected.size === 0) {
       setStep(MACHINES);
-    } else if (presetProductCode) {
-      const group = inventorySummary?.products.find((p) => p.kind === 'MSI' && p.productCode === presetProductCode);
+    } else if (presetFromInventory) {
+      const group = inventorySummary?.products.find((p) =>
+        presetProductCode
+          ? p.kind === 'MSI' && p.productCode === presetProductCode
+          : p.uninstall.available && p.uninstall.programId === presetProgramId,
+      );
       if (group) setUninstallTarget(fromInventory(group));
       else setStep(SOFTWARE);
     } else if (!chosen || unavailableReason(chosen, action) !== null || (action === 'INSTALL' && !chosen.active)) {
       setSoftwareId(null);
       setStep(SOFTWARE);
     }
-  }, [machines, software, selected, chosen, action, presetProductCode, inventorySummary, summaryError]);
+  }, [machines, software, selected, chosen, action, presetFromInventory, presetProductCode, presetProgramId, inventorySummary, summaryError]);
 
   // Desinstalação: o que aparece no rodapé e na revisão.
   const target = uninstall ? uninstallTarget : null;
@@ -222,7 +234,7 @@ export function NewDeploymentPage() {
 
   async function start() {
     if (submitting || (uninstall ? !target : !chosen)) return;
-    if (target && !target.inCatalog && !confirmed) return;
+    if (target && needsConfirm(target) && !confirmed) return;
     setSubmitting(true);
     setSubmitError(null);
     const machineIds = selectedMachines.map((m) => m.id);
@@ -230,7 +242,9 @@ export function NewDeploymentPage() {
       setCreated(
         await createDeployment(
           uninstall
-            ? { action, productCode: target!.productCode, machineIds }
+            ? target!.method === 'VENDOR'
+              ? { action, programId: target!.programId!, machineIds }
+              : { action, productCode: target!.productCode!, machineIds }
             : { action, softwareId: chosen!.id, machineIds },
         ),
       );
@@ -372,7 +386,8 @@ export function NewDeploymentPage() {
             targetName={targetName ?? ''}
             action={action}
             error={submitError}
-            requireConfirm={target !== null && !target.inCatalog}
+            requireConfirm={target !== null && needsConfirm(target)}
+            vendor={target?.method === 'VENDOR'}
             confirmed={confirmed}
             onConfirm={setConfirmed}
           />
@@ -422,7 +437,7 @@ export function NewDeploymentPage() {
             <button
               type="button"
               onClick={start}
-              disabled={submitting || (target !== null && !target.inCatalog && !confirmed)}
+              disabled={submitting || (target !== null && needsConfirm(target) && !confirmed)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <PlayIcon className="h-4 w-4" />

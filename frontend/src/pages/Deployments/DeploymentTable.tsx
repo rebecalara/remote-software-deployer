@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef } from 'react';
 import type { Deployment, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime } from '../../utils/format';
 import { DeploymentPanel } from './DeploymentPanel';
-import { ActionBadge, OutsideCatalogBadge, StatusBadge, countsText, deploymentTarget, durationText } from './deploymentUi';
+import { ActionBadge, OutsideCatalogBadge, StatusBadge, VendorBadge, countsText, deploymentTarget, durationText } from './deploymentUi';
 
 // Lista de implantações do Monitoramento e do Histórico. Cada linha expande ali mesmo
 // (acordeão) e mostra o DeploymentPanel: máquinas, fases, logs e "Cancelar pendentes".
@@ -85,7 +85,7 @@ export function DeploymentTable({
                       <span>
                         {deploymentTarget(d).name} <span className="font-mono">{deploymentTarget(d).version}</span>
                       </span>
-                      {!deploymentTarget(d).inCatalog && <OutsideCatalogBadge />}
+                      {d.vendorCommand ? <VendorBadge /> : !deploymentTarget(d).inCatalog && <OutsideCatalogBadge />}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{countsText(d.counts)}</td>

@@ -8,6 +8,16 @@ export interface InventoryCatalogMatch {
   uninstallAvailable: boolean;
 }
 
+/** Se o item pode ser desinstalado e, se não, por quê (espelha uninstallInfo do backend). */
+export interface UninstallInfo {
+  available: boolean;
+  /** MSI = pelo ProductCode; VENDOR = comando do fabricante (exceção controlada). */
+  method: 'MSI' | 'VENDOR' | null;
+  reason: string | null;
+  programId: string | null;
+  command: string | null;
+}
+
 export interface InventoryItem {
   name: string;
   version: string | null;
@@ -19,6 +29,7 @@ export interface InventoryItem {
   arch: '64' | '32';
   /** Software do catálogo com o mesmo ProductCode (só MSI). */
   catalog: InventoryCatalogMatch | null;
+  uninstall: UninstallInfo;
 }
 
 export interface MachineInventory {
@@ -40,6 +51,7 @@ export interface InventoryProductGroup {
   /** Máquinas selecionadas que têm o item. */
   machineIds: string[];
   catalog: InventoryCatalogMatch | null;
+  uninstall: UninstallInfo;
 }
 
 /** POST /machines/inventory-summary */

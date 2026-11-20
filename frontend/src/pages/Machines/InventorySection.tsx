@@ -7,7 +7,7 @@ import type { InventoryItem, InventoryState } from '../../types/inventory';
 import type { Machine } from '../../types/machine';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import type { NewDeploymentLocationState } from '../Deployments/NewDeploymentPage';
-import { OutsideCatalogBadge } from '../Deployments/deploymentUi';
+import { OutsideCatalogBadge, VendorBadge } from '../Deployments/deploymentUi';
 
 // RF08: software instalado na máquina. A consulta é AO VIVO pelo WinRM (só leitura, só
 // ADMIN/OPERATOR) e a última consulta bem-sucedida fica guardada, com data e quem
@@ -77,12 +77,13 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
         : null;
 
   /** Atalho para qualquer MSI (do catálogo ou não): vai pelo ProductCode do inventário. */
+  /** Atalho: MSI pelo ProductCode; programa (não MSI) pelo id do comando do fabricante. */
   function uninstall(item: InventoryItem) {
-    if (!item.productCode) return;
+    if (!item.uninstall.available) return;
     navigate('/deployments/new', {
       state: {
         machineIds: [machine.id],
-        productCode: item.productCode,
+        ...(item.productCode ? { productCode: item.productCode } : { programId: item.uninstall.programId! }),
         action: 'UNINSTALL',
         startAtReview: true,
       } satisfies NewDeploymentLocationState,
@@ -196,6 +197,26 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
                       >
                         Desinstalar
                       </button>
+                    )}
+                  </div>
+                )}
+                {!item.productCode && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="vendor-uninstall">
+                    {item.uninstall.available ? (
+                      <>
+                        <VendorBadge />
+                        {canCollect && machine.seenInLastSync && (
+                          <button
+                            type="button"
+                            onClick={() => uninstall(item)}
+                            className="rounded-md border border-violet-200 bg-white px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-50"
+                          >
+                            Desinstalar
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">{item.uninstall.reason}</span>
                     )}
                   </div>
                 )}

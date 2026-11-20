@@ -6,7 +6,12 @@ import type { InventoryProductGroup, InventorySummary } from '../../types/invent
  */
 export interface UninstallTarget {
   key: string;
-  productCode: string;
+  /** MSI = msiexec /x {ProductCode}; VENDOR = comando do fabricante (exceção controlada). */
+  method: 'MSI' | 'VENDOR';
+  productCode: string | null;
+  /** Só VENDOR: id do servidor e o comando exato (vindo do servidor, só para exibir). */
+  programId: string | null;
+  command: string | null;
   name: string;
   version: string | null;
   publisher: string | null;
@@ -19,8 +24,11 @@ export interface UninstallTarget {
 
 export function fromInventory(g: InventoryProductGroup): UninstallTarget {
   return {
-    key: `inv:${g.productCode}`,
-    productCode: g.productCode!,
+    key: g.productCode ? `inv:${g.productCode}` : `prog:${g.uninstall.programId}`,
+    method: g.productCode ? 'MSI' : 'VENDOR',
+    productCode: g.productCode,
+    programId: g.productCode ? null : g.uninstall.programId,
+    command: g.productCode ? null : g.uninstall.command,
     name: g.name,
     version: g.version,
     publisher: g.publisher,

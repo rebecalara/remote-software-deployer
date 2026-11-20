@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { CheckCircleIcon, RefreshIcon, SearchIcon } from '../../components/icons';
 import type { InventorySummary } from '../../types/inventory';
 import { formatDateTime } from '../../utils/format';
-import { OutsideCatalogBadge } from './deploymentUi';
+import { OutsideCatalogBadge, VendorBadge } from './deploymentUi';
 import { fromInventory, machinesToConsult, type UninstallTarget } from './uninstallTarget';
 import { EmptyState, plural } from './wizardParts';
 
@@ -13,10 +13,11 @@ export interface ConsultProgress {
   failures: Array<{ hostname: string; message: string }>;
 }
 
-/** Por que um item que não é MSI não pode ser desinstalado (decisão da autora). */
-export const OTHER_NOT_UNINSTALLABLE =
-  'Só MSI pode ser desinstalado: para os outros, o único caminho seria executar o comando de desinstalação ' +
-  'gravado pelo próprio programa no registro, e o sistema não executa comandos que não sejam dele.';
+/** Regra para quem não é MSI (decisão da autora: exceção controlada). */
+export const OTHER_UNINSTALL_RULE =
+  'Programas que não são MSI só podem ser desinstalados pelo comando silencioso que o próprio programa ' +
+  'declarou (QuietUninstallString), depois de conferido pelo sistema. O comando comum de desinstalação ' +
+  '(UninstallString) nunca é executado.';
 
 /**
  * Passo 2 em "Desinstalar": o software instalado nas máquinas selecionadas, a partir da
@@ -129,7 +130,7 @@ export function UninstallChoices({
         />
       </label>
 
-      <p className="text-xs text-slate-500">{OTHER_NOT_UNINSTALLABLE}</p>
+      <p className="text-xs text-slate-500">{OTHER_UNINSTALL_RULE}</p>
 
       <div role="radiogroup" aria-label="Software instalado" className="grid gap-2 lg:grid-cols-2" data-testid="installed-products">
         {products.length === 0 && (
@@ -139,7 +140,9 @@ export function UninstallChoices({
         )}
         {products.map((p) => {
           const msi = p.kind === 'MSI';
-          const target = msi ? fromInventory(p) : null;
+          const vendor = !msi && p.uninstall.available;
+          const selectable = msi || vendor;
+          const target = selectable ? fromInventory(p) : null;
           const selected = target !== null && target.key === selectedKey;
           return (
             <button
@@ -147,14 +150,14 @@ export function UninstallChoices({
               type="button"
               role="radio"
               aria-checked={selected}
-              disabled={!msi}
+              disabled={!selectable}
               onClick={() => target && onSelect(target)}
-              title={msi ? undefined : OTHER_NOT_UNINSTALLABLE}
+              title={selectable ? undefined : (p.uninstall.reason ?? undefined)}
               data-product={p.name}
               className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
                 selected
                   ? 'border-blue-500 bg-blue-50/70 ring-1 ring-blue-500'
-                  : msi
+                  : selectable
                     ? 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     : 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60'
               }`}
@@ -180,7 +183,8 @@ export function UninstallChoices({
                   ) : (
                     <OutsideCatalogBadge />
                   ))}
-                  {!msi && <span className="text-[11px] text-slate-500">não é MSI — não pode ser desinstalado</span>}
+                  {vendor && <VendorBadge />}
+                  {!selectable && <span className="text-[11px] text-slate-500" data-testid="blocked-reason">{p.uninstall.reason}</span>}
                 </span>
               </span>
               {selected && <CheckCircleIcon className="h-5 w-5 shrink-0 text-blue-700" />}

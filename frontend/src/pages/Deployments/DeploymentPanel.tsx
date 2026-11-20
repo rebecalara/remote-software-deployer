@@ -126,6 +126,11 @@ export function DeploymentPanel({
 
   return (
     <div className="space-y-3" data-testid="deployment-panel">
+      {deployment.vendorCommand && (
+        <p className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900" data-testid="vendor-command">
+          Comando do fabricante executado: <span className="font-mono break-all">{deployment.vendorCommand}</span>
+        </p>
+      )}
       {/* Abas por status + cancelar + indicador de atualização */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="tablist" aria-label="Filtrar máquinas" className="flex flex-wrap gap-1 border-b border-slate-200">

@@ -114,6 +114,15 @@ export function OutsideCatalogBadge() {
   );
 }
 
+/** Selo para desinstalação pelo comando do fabricante (programa que não é MSI). */
+export function VendorBadge() {
+  return (
+    <span className="inline-flex rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-orange-800">
+      Comando do fabricante
+    </span>
+  );
+}
+
 /** Selo "Instalação" / "Desinstalação" (Monitoramento, Histórico, Dashboard). */
 export function ActionBadge({ action }: { action: DeploymentAction }) {
   return action === 'UNINSTALL' ? (

@@ -27,6 +27,10 @@ const RUNNING_PHASES: Array<[prefix: string, label: string]> = [
   // Desinstalação (só MSI): nada é copiado.
   ['Produto instalado na máquina', 'Conferindo se está instalado'],
   ['Executando a desinstalação', 'Desinstalando'],
+  // Comando do fabricante (programa que não é MSI).
+  ['Comando de desinstalação conferido', 'Conferindo o comando'],
+  ['Assinatura do executável', 'Conferindo o comando'],
+  ['Executando o desinstalador do fabricante', 'Desinstalando'],
   ['O desinstalador terminou', 'Finalizando'],
   ['Arquivos temporários apagados', 'Finalizando'],
   ['Não foi possível apagar', 'Finalizando'],
@@ -38,6 +42,8 @@ export function phaseOf(target: Pick<DeploymentTarget, 'status' | 'lastLog' | 'e
     case 'PENDING':
       return { label: 'Aguardando na fila', tone: 'waiting' };
     case 'RUNNING': {
+      // Comando do fabricante: depois que o processo termina, espera a chave sair do registro.
+      if (message.includes('Conferindo se o programa saiu do registro')) return { label: 'Confirmando a remoção', tone: 'running' };
       const match = RUNNING_PHASES.find(([prefix]) => message.startsWith(prefix));
       return { label: match ? match[1] : 'Em execução', tone: 'running' };
     }
