@@ -102,7 +102,7 @@ describe('DeploymentsService.create — desinstalação pelo inventário', () =>
       { isAvailable: true, exists: jest.fn() } as never,
       { enqueue: jest.fn() } as never,
     );
-    const input = { action: 'UNINSTALL' as const, softwareId: null, productCode: PUTTY, machineIds: [M1, M2], name: null };
+    const input = { action: 'UNINSTALL' as const, softwareId: null, productCode: PUTTY, programId: null, machineIds: [M1, M2], name: null };
     return { prisma, service, input };
   }
 
@@ -283,8 +283,15 @@ describe('InventoryService.summary (lista agrupada para o assistente)', () => {
   });
 });
 
-describe('inventory-target.ps1 — nunca o comando de desinstalação do registro', () => {
-  it('não lê UninstallString nem QuietUninstallString (seria execução arbitrária)', () => {
-    expect(readFileSync(INVENTORY_SCRIPT_PATH, 'utf8')).not.toMatch(/UninstallString/i);
+describe('inventory-target.ps1 — nunca o UninstallString', () => {
+  it('lê só o QuietUninstallString (exceção controlada); o UninstallString nunca', () => {
+    // Só o código: o comentário do cabeçalho cita o nome justamente para dizer que não é lido.
+    const text = readFileSync(INVENTORY_SCRIPT_PATH, 'utf8')
+      .replace(/<#[\s\S]*?#>/g, '')
+      .split(/\r?\n/)
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+    expect(text).toContain("'QuietUninstallString'");
+    expect(text).not.toMatch(/(?<!quiet)uninstallstring/i);
   });
 });

@@ -19,6 +19,11 @@ export interface DeploymentCreateInput {
    * das máquinas e tira de lá o nome, a versão e o fabricante — nunca do navegador.
    */
   productCode: string | null;
+  /**
+   * Só desinstalação de programa que NÃO é MSI (comando do fabricante): o id calculado
+   * pelo servidor no resumo do inventário. O comando nunca vem do navegador.
+   */
+  programId: string | null;
   /** Sem repetição, na ordem em que vieram. */
   machineIds: string[];
   /** null = o servidor gera ("7-Zip 26.06 — 5 máquinas"). */
@@ -27,7 +32,8 @@ export interface DeploymentCreateInput {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-const ALLOWED_FIELDS = new Set(['action', 'softwareId', 'productCode', 'machineIds', 'name']);
+const ALLOWED_FIELDS = new Set(['action', 'softwareId', 'productCode', 'programId', 'machineIds', 'name']);
+const PROGRAM_ID = /^[0-9a-f]{64}$/;
 /** ProductCode do Windows Installer: GUID entre chaves. */
 const PRODUCT_CODE = /^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$/i;
 /** Filtro do Histórico: implantações de produtos fora do catálogo (softwareId nulo). */
@@ -51,7 +57,16 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
 
   let softwareId: string | null = null;
   let productCode: string | null = null;
-  if (data.productCode !== undefined && data.productCode !== null) {
+  let programId: string | null = null;
+  const present = (v: unknown) => v !== undefined && v !== null;
+  if (present(data.programId)) {
+    if (action !== 'UNINSTALL') throw invalid('programId', 'programId só vale para desinstalar.');
+    if (typeof data.programId !== 'string' || !PROGRAM_ID.test(data.programId)) throw invalid('programId', 'Programa inválido.');
+    if (present(data.softwareId) || present(data.productCode)) {
+      throw invalid('programId', 'Informe só um: o software do catálogo, o ProductCode ou o programa.');
+    }
+    programId = data.programId;
+  } else if (data.productCode !== undefined && data.productCode !== null) {
     if (action !== 'UNINSTALL') throw invalid('productCode', 'ProductCode só vale para desinstalar.');
     if (typeof data.productCode !== 'string' || !PRODUCT_CODE.test(data.productCode)) {
       throw invalid('productCode', 'ProductCode inválido.');
@@ -89,7 +104,7 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
     name = trimmed || null;
   }
 
-  return { action, softwareId, productCode, machineIds, name };
+  return { action, softwareId, productCode, programId, machineIds, name };
 }
 
 function invalid(field: string, message: string): BadRequestException {

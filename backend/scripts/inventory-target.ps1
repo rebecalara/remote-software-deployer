@@ -8,6 +8,9 @@
   pasta e criada, o C$ nao e usado e nenhum processo e iniciado. Nunca Win32_Product
   (consultar essa classe faz o Windows Installer verificar e reparar cada MSI) e nunca
   Get-Package (a PoC mostrou que sozinho e insuficiente, e pode tentar baixar provedor).
+  Le tambem o QuietUninstallString e o InstallLocation (desinstalacao de programa que
+  nao e MSI, excecao controlada - DECISIONS.md). O UninstallString (sem "Quiet") NUNCA
+  e lido: so o comando silencioso que o proprio programa declarou pode ser usado.
 
   Entrada: UM objeto JSON pela entrada padrao (nunca pela linha de comando):
     { computerName, connectTimeoutSeconds, readTimeoutSeconds, credential? }
@@ -193,7 +196,8 @@ try {
           if ($null -eq $p) { continue }
           $values = @{}
           foreach ($n in 'DisplayName', 'DisplayVersion', 'Publisher', 'InstallDate', 'SystemComponent',
-                         'ParentKeyName', 'ReleaseType', 'WindowsInstaller') {
+                         'ParentKeyName', 'ReleaseType', 'WindowsInstaller', 'QuietUninstallString',
+                         'InstallLocation') {
             $prop = $p.PSObject.Properties[$n]
             $values[$n] = if ($prop) { $prop.Value } else { $null }
           }
@@ -211,6 +215,9 @@ try {
             installDate = [string] $values['InstallDate']
             productCode = if ($isMsi) { $key.PSChildName.ToUpperInvariant() } else { '' }
             arch = $view.Arch
+            uninstallKey = $key.PSChildName
+            quietUninstallString = [string] $values['QuietUninstallString']
+            installLocation = [string] $values['InstallLocation']
           })
         }
       }
@@ -234,6 +241,9 @@ try {
       installDate = if ($date -match '^(\d{4})(\d{2})(\d{2})$') { "$($Matches[1])-$($Matches[2])-$($Matches[3])" } else { '' }
       productCode = [string] $i['productCode']
       arch = [string] $i['arch']
+      uninstallKey = [string] $i['uninstallKey']
+      quietUninstallString = [string] $i['quietUninstallString']
+      installLocation = [string] $i['installLocation']
     }
   })
   Write-Log 'INFO' 'read' "Leitura concluída: $($items.Count) itens."

@@ -149,6 +149,13 @@ model Deployment {
   productVersion   String?
   productPublisher String?
 
+  /// Desinstalação de programa que NÃO é MSI (exceção controlada, DECISIONS.md): a
+  /// subchave Uninstall (64 ou 32 bits) e o QuietUninstallString do fabricante, como
+  /// estavam no inventário guardado. Na máquina, o comando relido precisa ser idêntico.
+  uninstallKey     String?
+  uninstallArch    String?
+  uninstallCommand String?
+
   user     User               @relation(fields: [userId], references: [id])
   // Restrict explícito: numa relação opcional o padrão do Prisma seria SetNull, e apagar
   // um software esvaziaria o vínculo das implantações. Mantém o comportamento de antes.

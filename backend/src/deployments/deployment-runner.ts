@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { aggregateDeploymentStatus, interpretResult } from './deployment-outcome';
 import { DeployResult, PowerShellExecutor } from './powershell-executor';
+import { VENDOR_UNINSTALL_DISABLED, vendorUninstallEnabled } from './vendor-uninstall';
 import { QueueItem, TargetQueue, parseMaxParallel } from './target-queue';
 
 export const RESTART_MESSAGE_RUNNING =
@@ -128,12 +129,29 @@ export class DeploymentRunner implements OnApplicationBootstrap {
         // Só o ProductCode vai para a máquina: nada é copiado, e os argumentos do
         // catálogo (propriedades de instalação) não são repassados.
         const productCode = d.productCode ?? software?.msiProductCode ?? null;
-        result = productCode
-          ? await this.executor.run(
-              { action: 'UNINSTALL', targetId, computerName: hostname, installType: 'MSI', productCode },
-              (event) => log.write(event.level, event.message),
-            )
-          : { ok: false, phase: 'validate', reason: 'invalid-input', message: 'A implantação não tem ProductCode para desinstalar.' };
+        if (d.uninstallCommand) {
+          // Programa que não é MSI: comando do fabricante (exceção controlada). A
+          // configuração é conferida de novo aqui — desligada, nada é executado.
+          result = !vendorUninstallEnabled()
+            ? { ok: false, phase: 'validate', reason: 'invalid-input', message: VENDOR_UNINSTALL_DISABLED }
+            : await this.executor.uninstallProgram(
+                {
+                  targetId,
+                  computerName: hostname,
+                  arch: d.uninstallArch === '32' ? '32' : '64',
+                  uninstallKey: d.uninstallKey!,
+                  command: d.uninstallCommand,
+                },
+                (event) => log.write(event.level, event.message),
+              );
+        } else {
+          result = productCode
+            ? await this.executor.run(
+                { action: 'UNINSTALL', targetId, computerName: hostname, installType: 'MSI', productCode },
+                (event) => log.write(event.level, event.message),
+              )
+            : { ok: false, phase: 'validate', reason: 'invalid-input', message: 'A implantação não tem ProductCode para desinstalar.' };
+        }
       } else {
         const installerProblem = await this.installerProblem(software.installerFileName);
         result = installerProblem

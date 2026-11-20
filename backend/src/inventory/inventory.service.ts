@@ -11,6 +11,12 @@ import {
 } from '@nestjs/common';
 import { InstallType, Prisma } from '@prisma/client';
 import { InventoryFailureReason, InventoryItem, PowerShellExecutor } from '../deployments/powershell-executor';
+import {
+  VENDOR_UNINSTALL_DISABLED,
+  checkUninstallCommand,
+  programId as computeProgramId,
+  vendorUninstallEnabled,
+} from '../deployments/vendor-uninstall';
 import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -32,9 +38,47 @@ export interface CatalogMatch {
   uninstallAvailable: boolean;
 }
 
+/** Se o item pode ser desinstalado e, se não, por quê. */
+export interface UninstallInfo {
+  available: boolean;
+  /** 'MSI' (ProductCode) ou 'VENDOR' (comando do fabricante, exceção controlada). */
+  method: 'MSI' | 'VENDOR' | null;
+  reason: string | null;
+  /** Só VENDOR: id calculado no servidor (visão + subchave + comando). */
+  programId: string | null;
+  /** Só VENDOR: o comando exato, para a revisão mostrar o que vai rodar. */
+  command: string | null;
+}
+
+export const OUTDATED_INVENTORY =
+  'Consulte de novo o software instalado para saber se este programa pode ser desinstalado.';
+export const NO_QUIET_UNINSTALL = 'O programa não declarou desinstalação silenciosa (QuietUninstallString).';
+
+/**
+ * MSI: sempre (pelo ProductCode). Os outros: só pelo QuietUninstallString declarado pelo
+ * programa, validado, e com a exceção ligada (DEPLOYMENT_ALLOW_VENDOR_UNINSTALL).
+ */
+export function uninstallInfo(item: InventoryItem, enabled: boolean = vendorUninstallEnabled()): UninstallInfo {
+  const no = (reason: string): UninstallInfo => ({ available: false, method: null, reason, programId: null, command: null });
+  if (item.productCode) return { available: true, method: 'MSI', reason: null, programId: null, command: null };
+  if (item.uninstallKey === undefined) return no(OUTDATED_INVENTORY);
+  if (!item.uninstallKey || !item.quietUninstallString) return no(NO_QUIET_UNINSTALL);
+  const check = checkUninstallCommand(item.quietUninstallString);
+  if ('reason' in check) return no(`Comando de desinstalação recusado: ${check.reason}`);
+  if (!enabled) return no(VENDOR_UNINSTALL_DISABLED);
+  return {
+    available: true,
+    method: 'VENDOR',
+    reason: null,
+    programId: computeProgramId(item.arch, item.uninstallKey, item.quietUninstallString),
+    command: item.quietUninstallString,
+  };
+}
+
 export interface InventoryItemView extends InventoryItem {
   /** Software do catálogo com o mesmo ProductCode (só MSI); null se não houver. */
   catalog: CatalogMatch | null;
+  uninstall: UninstallInfo;
 }
 
 export interface InventoryView {
@@ -56,6 +100,7 @@ export interface InventoryProductGroup {
   /** Máquinas selecionadas que têm o item, na ordem da seleção. */
   machineIds: string[];
   catalog: CatalogMatch | null;
+  uninstall: UninstallInfo;
 }
 
 /** POST /machines/inventory-summary */
@@ -175,7 +220,7 @@ export class InventoryService {
       machineId: row.machineId,
       collectedAt: row.collectedAt.toISOString(),
       collectedBy: row.collectedBy,
-      items: items.map((i) => ({ ...i, catalog: i.productCode ? (byCode.get(i.productCode) ?? null) : null })),
+      items: items.map((i) => ({ ...i, catalog: i.productCode ? (byCode.get(i.productCode) ?? null) : null, uninstall: uninstallInfo(i) })),
     };
   }
 
@@ -230,7 +275,14 @@ export class InventoryService {
     for (const inv of inventories) {
       const items = (Array.isArray(inv.items) ? inv.items : []) as unknown as InventoryItem[];
       for (const item of items) {
-        const key = item.productCode ? `MSI|${item.productCode}` : `OTHER|${item.name.toLowerCase()}|${item.version ?? ''}`;
+        // Programa desinstalável por comando do fabricante: um grupo por programId (só
+        // juntam máquinas com o MESMO comando). Os outros "Outro": por nome e versão.
+        const info = uninstallInfo(item);
+        const key = item.productCode
+          ? `MSI|${item.productCode}`
+          : info.programId
+            ? `PROG|${info.programId}`
+            : `OTHER|${item.name.toLowerCase()}|${item.version ?? ''}`;
         let g = groups.get(key);
         if (!g) {
           g = {
@@ -242,6 +294,7 @@ export class InventoryService {
             publisher: item.publisher,
             machineIds: [],
             catalog: null,
+            uninstall: info,
             machineSet: new Set(),
           };
           groups.set(key, g);

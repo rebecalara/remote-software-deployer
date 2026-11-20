@@ -190,7 +190,7 @@ describe('DeploymentsService.create — desinstalação', () => {
       { enqueue: jest.fn() } as never,
       softwareService as never,
     );
-    const input = { action: 'UNINSTALL' as const, softwareId: SW, productCode: null as string | null, machineIds: [M1], name: null };
+    const input = { action: 'UNINSTALL' as const, softwareId: SW, productCode: null as string | null, programId: null as string | null, machineIds: [M1], name: null };
     return { prisma, storage, softwareService, service, input };
   }
 

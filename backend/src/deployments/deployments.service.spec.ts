@@ -70,6 +70,7 @@ const input = (overrides = {}) => ({
   action: 'INSTALL' as 'INSTALL' | 'UNINSTALL',
   softwareId: SW_ID as string | null,
   productCode: null as string | null,
+  programId: null as string | null,
   machineIds: [M1, M2],
   name: null,
   ...overrides,

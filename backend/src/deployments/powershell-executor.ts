@@ -33,6 +33,7 @@ export type DeployPhase =
   | 'check'
   | 'install'
   | 'uninstall'
+  | 'confirm'
   | 'cleanup'
   | 'executor';
 
@@ -49,6 +50,12 @@ export type DeployFailureReason =
   | 'hash-mismatch'
   | 'install-timeout'
   | 'uninstall-timeout'
+  // Desinstalação por comando do fabricante:
+  | 'command-changed'
+  | 'command-rejected'
+  | 'executable-missing'
+  | 'reparse-point'
+  | 'still-installed'
   | 'unexpected'
   // Do lado do Node:
   | 'unavailable'
@@ -102,8 +109,12 @@ export interface DeployEvent {
 export type DeployResult =
   | { ok: true; exitCode: number }
   | { ok: true; alreadyInstalled: true; productCode: string }
-  | { ok: true; notInstalled: true; productCode: string }
-  | { ok: false; phase: DeployPhase; reason: DeployFailureReason; message: string };
+  /** productCode null = programa que não é MSI (comando do fabricante). */
+  | { ok: true; notInstalled: true; productCode: string | null }
+  /** Comando do fabricante: a chave saiu do registro (o código de saída só informa). */
+  | { ok: true; removed: true; exitCode: number }
+  /** exitCode: quando o desinstalador do fabricante chegou a rodar (ex.: still-installed). */
+  | { ok: false; phase: DeployPhase; reason: DeployFailureReason; message: string; exitCode?: number | null };
 
 export interface WinRmCredential {
   username: string;
@@ -120,6 +131,10 @@ export interface PowerShellExecutorConfig {
   inventoryWatchdogMs?: number;
   /** RF08: preenchido quando a consulta não pode rodar (ex.: script ausente). */
   inventoryUnavailableReason?: string | null;
+  /** Comando do fabricante: argumentos para o uninstall-program-target.ps1 (testes). */
+  programUninstallArgs?: string[];
+  /** Comando do fabricante: preenchido quando o script (ou as regras) não existe. */
+  programUninstallUnavailableReason?: string | null;
   /** null = identidade do próprio processo (produção, conta de serviço via Kerberos). */
   credential: WinRmCredential | null;
   connectTimeoutSeconds: number;
@@ -256,6 +271,107 @@ export class PowerShellExecutor {
     });
   }
 
+  /**
+   * Desinstalação de programa que NÃO é MSI, pelo comando do fabricante (exceção
+   * controlada, DECISIONS.md): script fixo uninstall-program-target.ps1. Mesma credencial,
+   * mesmo filtro de senha e mesmos eventos (viram DeploymentLog) da implantação; método à
+   * parte — o run() não muda. Nunca lança.
+   */
+  uninstallProgram(input: ProgramUninstallInput, onEvent: (event: DeployEvent) => void): Promise<DeployResult> {
+    if (!this.isAvailable) {
+      return Promise.resolve(fail('executor', 'unavailable', this.config.unavailableReason!));
+    }
+    if (this.config.programUninstallUnavailableReason) {
+      return Promise.resolve(fail('executor', 'unavailable', this.config.programUninstallUnavailableReason));
+    }
+    const secrets = this.config.credential?.password ? [this.config.credential.password] : [];
+    const clean = (text: string) => truncate(redact(text, secrets), MAX_MESSAGE_LENGTH);
+    const emit = (event: DeployEvent) => {
+      try {
+        onEvent({ ...event, message: clean(event.message) });
+      } catch {
+        // Quem consome o evento não derruba a execução.
+      }
+    };
+    const args = this.config.programUninstallArgs ?? this.config.args.map((a) => (a === DEPLOY_SCRIPT_PATH ? PROGRAM_UNINSTALL_SCRIPT_PATH : a));
+    // Sem cópia: conexão (2×) + desinstalação + espera pela remoção do registro + margem.
+    const watchdogMs =
+      (2 * this.config.connectTimeoutSeconds + this.config.installTimeoutSeconds + PROGRAM_REMOVAL_WAIT_SECONDS + this.config.watchdogMarginSeconds) * 1000;
+
+    return new Promise<DeployResult>((resolvePromise) => {
+      let settled = false;
+      let result: DeployResult | null = null;
+      let stderr = '';
+      let watchdogFired = false;
+      const finish = (value: DeployResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        resolvePromise(value);
+      };
+
+      const child = spawn(this.config.command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const watchdog = setTimeout(() => {
+        watchdogFired = true;
+        child.kill();
+      }, watchdogMs);
+
+      child.on('error', (err) => {
+        finish(fail('executor', 'spawn-failed', clean(`Não foi possível iniciar o PowerShell: ${err.message}`)));
+      });
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        if (stderr.length < MAX_STDERR_LENGTH) stderr += chunk;
+      });
+      const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+      lines.on('line', (line) => {
+        if (line.trim() === '') return;
+        const event = parseProgramUninstallLine(line);
+        if (event === null) {
+          emit({ level: LogLevel.DEBUG, phase: 'executor', message: line });
+        } else if (event.type === 'log') {
+          emit({ level: event.level, phase: event.phase, message: event.message });
+        } else if (result === null) {
+          const r = event.result;
+          result = 'message' in r ? { ...r, message: clean(r.message) } : r;
+        }
+      });
+      child.on('close', (code) => {
+        if (watchdogFired) {
+          finish(
+            fail(
+              'executor',
+              'watchdog-timeout',
+              `O processo de desinstalação passou do limite geral (${Math.round(watchdogMs / 1000)} s) e foi encerrado. ` +
+                'O desinstalador pode continuar na máquina de destino — confira a máquina.',
+            ),
+          );
+          return;
+        }
+        if (result !== null) {
+          finish(result);
+          return;
+        }
+        const detail = stderr.trim() ? `: ${stderr.trim()}` : '.';
+        finish(fail('executor', 'no-result', clean(`O script terminou sem relatar resultado (código ${code})${detail}`)));
+      });
+
+      // A credencial só existe aqui e no stdin do processo filho. Nunca vai para log.
+      child.stdin.on('error', () => {
+        // O processo pode morrer antes de ler a entrada; o 'close' relata o resultado.
+      });
+      child.stdin.end(
+        toAsciiJson({
+          ...input,
+          connectTimeoutSeconds: this.config.connectTimeoutSeconds,
+          installTimeoutSeconds: this.config.installTimeoutSeconds,
+          removalWaitSeconds: PROGRAM_REMOVAL_WAIT_SECONDS,
+          credential: this.config.credential,
+        }),
+      );
+    });
+  }
+
   get isInventoryAvailable(): boolean {
     return this.isAvailable && !this.config.inventoryUnavailableReason;
   }
@@ -381,6 +497,9 @@ export function loadPowerShellExecutorConfig(
   if (!existsSync(INVENTORY_SCRIPT_PATH)) {
     base.inventoryUnavailableReason = `script de consulta não encontrado em ${INVENTORY_SCRIPT_PATH}.`;
   }
+  if (!existsSync(PROGRAM_UNINSTALL_SCRIPT_PATH) || !existsSync(join(__dirname, '..', '..', 'scripts', 'uninstall-command-rules.ps1'))) {
+    base.programUninstallUnavailableReason = 'script de desinstalação por comando do fabricante não encontrado.';
+  }
 
   const username = env.WINRM_USERNAME?.trim() ?? '';
   const password = env.WINRM_PASSWORD ?? '';
@@ -447,7 +566,7 @@ function fail(phase: DeployPhase, reason: DeployFailureReason, message: string):
 }
 
 const PHASES = new Set<DeployPhase>([
-  'validate', 'resolve', 'connect', 'copy', 'verify', 'check', 'install', 'uninstall', 'cleanup', 'executor',
+  'validate', 'resolve', 'connect', 'copy', 'verify', 'check', 'install', 'uninstall', 'confirm', 'cleanup', 'executor',
 ]);
 /** ProductCode do Windows Installer: GUID entre chaves. */
 const PRODUCT_CODE = /^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$/;
@@ -509,7 +628,21 @@ export interface InventoryItem {
   /** Só MSI: o nome da subchave Uninstall ({GUID} em maiúsculas). */
   productCode: string | null;
   arch: '64' | '32';
+  /**
+   * Nome da subchave Uninstall (de todos os itens). Ausente em consultas feitas antes da
+   * desinstalação por comando do fabricante: elas precisam ser refeitas para isso.
+   */
+  uninstallKey?: string | null;
+  /**
+   * QuietUninstallString declarado pelo próprio programa, EXATAMENTE como no registro
+   * (sem aparar nem truncar: na máquina, o comando relido tem de ser idêntico).
+   */
+  quietUninstallString?: string | null;
+  installLocation?: string | null;
 }
+
+/** Comando maior que isto não é guardado (o validador recusa acima de 1024). */
+const MAX_INVENTORY_COMMAND = 4096;
 
 export type InventoryFailureReason =
   | 'invalid-input'
@@ -577,11 +710,77 @@ export function normalizeInventoryItems(rawItems: unknown[]): InventoryItem[] {
       installDate: date,
       productCode: PRODUCT_CODE.test(code) ? code : null,
       arch: o.arch === '32' ? '32' : '64',
+      uninstallKey: typeof o.uninstallKey === 'string' && o.uninstallKey !== '' && o.uninstallKey.length <= 255 ? o.uninstallKey : null,
+      quietUninstallString:
+        typeof o.quietUninstallString === 'string' && o.quietUninstallString.trim() !== '' && o.quietUninstallString.length <= MAX_INVENTORY_COMMAND
+          ? o.quietUninstallString
+          : null,
+      installLocation: text(o.installLocation),
     };
-    const key = `${item.name.toLowerCase()}|${item.version ?? ''}|${item.productCode ?? ''}`;
+    // MSI: um item por ProductCode. Os outros: um por registro (visão + subchave), para
+    // não juntar dois programas diferentes que tenham o mesmo nome e versão.
+    const key = item.productCode
+      ? `msi|${item.productCode}`
+      : item.uninstallKey
+        ? `key|${item.arch}|${item.uninstallKey}`
+        : `${item.name.toLowerCase()}|${item.version ?? ''}`;
     if (!byKey.has(key)) byKey.set(key, item);
   }
   return [...byKey.values()]
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR') || (a.version ?? '').localeCompare(b.version ?? ''))
     .slice(0, MAX_INVENTORY_ITEMS);
+}
+
+
+// ---------- Desinstalação por comando do fabricante (programa que não é MSI) ----------
+
+/** backend/scripts/uninstall-program-target.ps1 */
+export const PROGRAM_UNINSTALL_SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'uninstall-program-target.ps1');
+/** Espera pela chave sair do registro depois que o desinstalador termina (decisão da autora). */
+export const PROGRAM_REMOVAL_WAIT_SECONDS = 120;
+
+export interface ProgramUninstallInput {
+  /** Id do DeploymentTarget. */
+  targetId: string;
+  computerName: string;
+  /** Visão do registro: '64' ou '32' (WOW6432Node). */
+  arch: '64' | '32';
+  /** Subchave Uninstall, como no inventário. */
+  uninstallKey: string;
+  /** QuietUninstallString exato do inventário; na máquina, o relido tem de ser idêntico. */
+  command: string;
+}
+
+const PROGRAM_FAILURE_REASONS = new Set([
+  'invalid-input', 'dns', 'unreachable', 'winrm-refused', 'access-denied', 'not-trusted', 'session',
+  'command-changed', 'command-rejected', 'executable-missing', 'reparse-point', 'uninstall-timeout',
+  'still-installed', 'unexpected',
+]);
+
+/** Linha do uninstall-program-target.ps1 → evento validado (fora do protocolo: null). */
+export function parseProgramUninstallLine(line: string): ParsedLine | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const e = raw as Record<string, unknown>;
+  const phase = PHASES.has(e.phase as DeployPhase) ? (e.phase as DeployPhase) : 'executor';
+  if (e.type === 'log' && typeof e.message === 'string' && LEVELS.has(e.level as string)) {
+    return { type: 'log', level: e.level as LogLevel, phase, message: e.message };
+  }
+  if (e.type === 'result' && e.ok === true && e.removed === true && Number.isInteger(e.exitCode)) {
+    return { type: 'result', result: { ok: true, removed: true, exitCode: e.exitCode as number } };
+  }
+  if (e.type === 'result' && e.ok === true && e.notInstalled === true) {
+    return { type: 'result', result: { ok: true, notInstalled: true, productCode: null } };
+  }
+  if (e.type === 'result' && e.ok === false && typeof e.message === 'string') {
+    const reason = typeof e.reason === 'string' && PROGRAM_FAILURE_REASONS.has(e.reason) ? (e.reason as DeployFailureReason) : 'unexpected';
+    const exitCode = Number.isInteger(e.exitCode) ? (e.exitCode as number) : null;
+    return { type: 'result', result: { ok: false, phase, reason, message: e.message, exitCode } };
+  }
+  return null;
 }

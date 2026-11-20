@@ -26,6 +26,20 @@ export function interpretResult(
   installType: InstallType,
   action: DeploymentAction = DeploymentAction.INSTALL,
 ): TargetOutcome {
+  // Falhas primeiro: a do comando do fabricante pode trazer o código de saída.
+  if ('message' in result) {
+    return { status: DeploymentStatus.FAILED, level: LogLevel.ERROR, message: result.message, exitCode: result.exitCode ?? null };
+  }
+  // Comando do fabricante: sucesso confirmado pelo registro (a chave saiu); o código de
+  // saída só informa (decisão da autora).
+  if ('removed' in result) {
+    return {
+      status: DeploymentStatus.SUCCEEDED,
+      level: LogLevel.INFO,
+      message: `Desinstalação concluída: o programa saiu do registro da máquina (o desinstalador terminou com o código ${result.exitCode}).`,
+      exitCode: result.exitCode,
+    };
+  }
   if ('exitCode' in result) {
     return { ...interpretExitCode(result.exitCode, installType, action), exitCode: result.exitCode };
   }
@@ -33,9 +47,10 @@ export function interpretResult(
     return {
       status: DeploymentStatus.SUCCEEDED,
       level: LogLevel.WARN,
-      message:
-        `Não estava instalado: o produto (ProductCode ${result.productCode}) não está instalado na máquina. ` +
-        'A desinstalação não foi executada.',
+      message: result.productCode
+        ? `Não estava instalado: o produto (ProductCode ${result.productCode}) não está instalado na máquina. ` +
+          'A desinstalação não foi executada.'
+        : 'Não estava instalado: o programa não está mais registrado na máquina. A desinstalação não foi executada.',
       exitCode: null,
     };
   }
@@ -49,7 +64,8 @@ export function interpretResult(
       exitCode: null,
     };
   }
-  return { status: DeploymentStatus.FAILED, level: LogLevel.ERROR, message: result.message, exitCode: null };
+  // Todos os formatos já foram tratados; isto só protege contra um resultado novo esquecido.
+  return { status: DeploymentStatus.FAILED, level: LogLevel.ERROR, message: 'Resultado desconhecido do executor.', exitCode: null };
 }
 
 /** Sucesso com reinício pendente ou iniciado: vale para MSI e EXE. */

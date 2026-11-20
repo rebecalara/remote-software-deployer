@@ -65,9 +65,9 @@ describe('parseInventoryLine / normalizeInventoryItems', () => {
     expect(parseInventoryLine(line)).toEqual({
       ok: true,
       items: [
-        { name: '7-Zip', version: '26.06', publisher: 'Igor Pavlov', installDate: '2026-11-19', productCode: CODE, arch: '64' },
-        { name: 'Código ruim', version: null, publisher: null, installDate: null, productCode: null, arch: '32' },
-        { name: 'Zeta', version: '1', publisher: null, installDate: null, productCode: null, arch: '64' },
+        { name: '7-Zip', version: '26.06', publisher: 'Igor Pavlov', installDate: '2026-11-19', productCode: CODE, arch: '64', uninstallKey: null, quietUninstallString: null, installLocation: null },
+        { name: 'Código ruim', version: null, publisher: null, installDate: null, productCode: null, arch: '32', uninstallKey: null, quietUninstallString: null, installLocation: null },
+        { name: 'Zeta', version: '1', publisher: null, installDate: null, productCode: null, arch: '64', uninstallKey: null, quietUninstallString: null, installLocation: null },
       ],
     });
   });

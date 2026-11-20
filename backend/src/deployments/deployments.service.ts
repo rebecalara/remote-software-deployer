@@ -12,7 +12,8 @@ import { InstallerStorageService } from '../software/installer-storage.service';
 import { SoftwareService } from '../software/software.service';
 import { DeploymentRunner } from './deployment-runner';
 import { DeploymentCreateInput, DeploymentListQuery, OUTSIDE_CATALOG } from './deployment-validation';
-import { PowerShellExecutor } from './powershell-executor';
+import { InventoryItem, PowerShellExecutor } from './powershell-executor';
+import { VENDOR_UNINSTALL_DISABLED, checkUninstallCommand, programId as computeProgramId, vendorUninstallEnabled } from './vendor-uninstall';
 
 export const SUMMARY_WINDOW_HOURS = 24;
 
@@ -66,10 +67,13 @@ export interface DeploymentCounts {
 
 /** Cópia do produto gravada na desinstalação (do catálogo ou do inventário). */
 interface ProductSnapshot {
-  code: string;
+  /** null = programa que não é MSI (comando do fabricante). */
+  code: string | null;
   name: string;
   version: string | null;
   publisher: string | null;
+  /** Só comando do fabricante: como estava no inventário guardado. */
+  vendor?: { key: string; arch: '64' | '32'; command: string };
 }
 
 interface DeploymentBase {
@@ -84,7 +88,9 @@ interface DeploymentBase {
   /** null = desinstalação de um MSI fora do catálogo (ver `product`). */
   software: { id: string; name: string; version: string; installType: InstallType } | null;
   /** Desinstalação: o produto removido (cópia do momento da criação). null na instalação. */
-  product: { productCode: string; name: string; version: string | null; publisher: string | null } | null;
+  product: { productCode: string | null; name: string; version: string | null; publisher: string | null } | null;
+  /** Desinstalação por comando do fabricante: o comando exato executado (auditoria). */
+  vendorCommand: string | null;
   requestedBy: { username: string; displayName: string | null };
   counts: DeploymentCounts;
 }
@@ -151,7 +157,12 @@ export class DeploymentsService {
 
     let software: Software | null = null;
     let product: ProductSnapshot | null = null;
-    if (input.productCode) {
+    if (input.programId) {
+      // Programa que não é MSI: comando do fabricante (exceção controlada, desligada por
+      // padrão). Comando, subchave e nome vêm do inventário guardado, no servidor.
+      if (!vendorUninstallEnabled()) throw new ConflictException(VENDOR_UNINSTALL_DISABLED);
+      product = await this.programFromInventory(input.programId, input.machineIds);
+    } else if (input.productCode) {
       // Desinstalação pelo inventário (pode estar fora do catálogo). O ProductCode precisa
       // aparecer na última consulta guardada de pelo menos uma das máquinas; nome, versão
       // e fabricante vêm desse inventário, no servidor (decisão da autora).
@@ -167,7 +178,7 @@ export class DeploymentsService {
       if (!software) throw new NotFoundException('Software não encontrado.');
     }
 
-    if (uninstall && !input.productCode) {
+    if (uninstall && !input.productCode && !input.programId) {
       // Desinstalação de um software do catálogo: só MSI e só o ProductCode — o
       // instalador não é copiado, então não precisa estar na pasta. Software desativado
       // PODE ser desinstalado (decisão da autora).
@@ -207,6 +218,9 @@ export class DeploymentsService {
         ...(product
           ? { productCode: product.code, productName: product.name, productVersion: product.version, productPublisher: product.publisher }
           : {}),
+        ...(product?.vendor
+          ? { uninstallKey: product.vendor.key, uninstallArch: product.vendor.arch, uninstallCommand: product.vendor.command }
+          : {}),
         targets: { create: input.machineIds.map((machineId) => ({ machine: { connect: { id: machineId } } })) },
       },
       include: deploymentInclude,
@@ -216,6 +230,38 @@ export class DeploymentsService {
     const targetByMachine = new Map(created.targets.map((t) => [t.machineId, t.id]));
     this.runner.enqueue(input.machineIds.map((machineId) => ({ targetId: targetByMachine.get(machineId)!, machineId })));
     return toDeploymentView(created);
+  }
+
+  /**
+   * Programa (não MSI) com este id na consulta MAIS RECENTE entre as máquinas selecionadas
+   * que o têm; o comando é validado de novo. 409 se não aparecer em nenhuma.
+   */
+  private async programFromInventory(programId: string, machineIds: string[]): Promise<ProductSnapshot> {
+    const inventories = await this.prisma.machineInventory.findMany({
+      where: { machineId: { in: machineIds } },
+      orderBy: { collectedAt: 'desc' },
+      select: { items: true },
+    });
+    for (const inv of inventories) {
+      const items = (Array.isArray(inv.items) ? inv.items : []) as unknown as InventoryItem[];
+      for (const item of items) {
+        if (item.productCode || !item.uninstallKey || !item.quietUninstallString) continue;
+        if (computeProgramId(item.arch, item.uninstallKey, item.quietUninstallString) !== programId) continue;
+        const check = checkUninstallCommand(item.quietUninstallString);
+        if ('reason' in check) throw new ConflictException(`O comando de desinstalação deste programa foi recusado: ${check.reason}`);
+        return {
+          code: null,
+          name: item.name,
+          version: item.version,
+          publisher: item.publisher,
+          vendor: { key: item.uninstallKey, arch: item.arch, command: item.quietUninstallString },
+        };
+      }
+    }
+    throw new ConflictException(
+      'Este programa não aparece no software instalado guardado de nenhuma das máquinas selecionadas. ' +
+        'Consulte o software instalado delas e tente de novo.',
+    );
   }
 
   /** Máquinas existentes e presentes na última sincronização com o AD (400/409). */
@@ -414,9 +460,11 @@ function toBase(d: DeploymentSummaryRow | DeploymentWithRelations): DeploymentBa
     startedAt: d.startedAt?.toISOString() ?? null,
     finishedAt: d.finishedAt?.toISOString() ?? null,
     software: d.software ?? null,
-    product: d.productCode
-      ? { productCode: d.productCode, name: d.productName ?? d.productCode, version: d.productVersion, publisher: d.productPublisher }
-      : null,
+    product:
+      d.productCode || d.uninstallCommand
+        ? { productCode: d.productCode, name: d.productName ?? d.productCode ?? '—', version: d.productVersion, publisher: d.productPublisher }
+        : null,
+    vendorCommand: d.uninstallCommand ?? null,
     requestedBy: d.user,
     counts: countStatuses(d.targets.map((t) => t.status)),
   };

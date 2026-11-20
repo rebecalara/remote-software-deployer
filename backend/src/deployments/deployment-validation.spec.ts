@@ -21,6 +21,7 @@ describe('validateDeploymentCreate', () => {
       action: 'INSTALL',
       softwareId: SW,
       productCode: null,
+      programId: null,
       machineIds: [M1, M2],
       name: null,
     });
