@@ -103,7 +103,8 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
   instalado nas máquinas selecionadas**, a partir do inventário guardado de cada uma
   (RF08), com quantas delas têm cada item.
   - **Qualquer MSI pode ser escolhido, inclusive fora do catálogo.**
-  - Os itens que não são MSI aparecem desativados.
+  - Os itens que não são MSI só podem ser escolhidos pelo **comando do fabricante**
+    (exceção controlada, logo abaixo); sem ele, aparecem desativados, com o motivo.
   - Máquinas sem inventário, ou com inventário de mais de 7 dias, geram um aviso e o
     botão "Consultar agora".
   - Aparece só o que o inventário encontrou, como no painel da máquina.
@@ -123,10 +124,28 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
   código 1605. Os códigos 0, 3010 e 1641 têm o mesmo tratamento da instalação.
 - **Software desativado** no catálogo pode ser desinstalado; instalar continua exigindo
   software ativo.
-- **Só MSI tem desinstalação:** para os outros, o único caminho seria executar o comando
-  de desinstalação gravado pelo próprio programa no registro (`UninstallString`), e o
-  sistema não executa comandos que não sejam dele. O script de inventário nem lê esse
-  valor. A tela explica isso no próprio passo.
+- **Programas que não são MSI: exceção controlada, desligada por padrão.** Com
+  `DEPLOYMENT_ALLOW_VENDOR_UNINSTALL="true"`, um programa que **declarou** no registro o
+  seu comando silencioso de desinstalação (`QuietUninstallString`) pode ser desinstalado
+  por ele. É a única exceção à regra "nunca executar comando que não seja do sistema":
+  - o comando vem do inventário guardado, no servidor; o navegador só manda um
+    identificador calculado pelo servidor;
+  - o comando é validado no servidor e de novo na máquina, com as mesmas regras e os
+    mesmos casos de teste. Ele precisa ter:
+    - um **.exe com caminho absoluto dentro de Program Files ou Program Files (x86)**;
+    - nada de `cmd`, `powershell`, `pwsh`, `wscript`, `cscript`, `mshta`,
+      `rundll32`, `regsvr32`, `msiexec` e similares;
+    - nada de caminho sem aspas com espaço, `..`, `~`, variáveis, `&`, `|`, `;` ou
+      redirecionamento;
+    - nenhuma junção ou link no caminho do executável;
+  - na máquina, o comando relido do registro precisa ser **idêntico** ao do inventário;
+    senão, nada é executado;
+  - a execução é por `Start-Process`, sem `cmd`, com tempo limite;
+  - **o sucesso é confirmado relendo o registro** (a chave do programa saiu), com
+    espera de até 2 minutos, qualquer que seja o código de saída;
+  - a assinatura digital do executável fica no log, sem bloquear;
+  - a confirmação no passo 4 é sempre obrigatória;
+  - o `UninstallString` (sem "Quiet") **nunca** é lido nem executado.
 
 ## Telas
 
@@ -163,6 +182,14 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
     ([`backend/scripts/read-msi-info.ps1`](backend/scripts/read-msi-info.ps1)) que abre
     o MSI só para leitura, ou do inventário guardado das máquinas selecionadas. Nenhum
     argumento do catálogo é usado, e o `UninstallString` do registro nunca é executado.
+  - **Exceção controlada:** um programa que não é MSI pode ser desinstalado pelo comando
+    silencioso que ele mesmo declarou (`QuietUninstallString`), com a opção ligada
+    (desligada por padrão). O comando é validado por regras fixas
+    ([`backend/scripts/uninstall-command-rules.ps1`](backend/scripts/uninstall-command-rules.ps1),
+    com os casos em [`uninstall-command-cases.json`](backend/scripts/uninstall-command-cases.json))
+    e executado por outro script fixo
+    ([`backend/scripts/uninstall-program-target.ps1`](backend/scripts/uninstall-program-target.ps1)).
+    Detalhes na seção de desinstalação, acima.
 - **O sistema nunca reinicia as máquinas.** O MSI roda com `/norestart`, e
   `REBOOT=ReallySuppress` é sempre o último argumento, na instalação e na desinstalação. O catálogo recusa `REBOOT` com
   outro valor. Isso foi encontrado na prática: na VM de teste, um `REBOOT=Force` vindo
@@ -334,6 +361,17 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   versão do produto. Pelo inventário dá para escolher a versão que está de fato
   instalada. Uma máquina sem inventário, ou com inventário desatualizado, pode ter outra
   versão, e nesse caso o resultado é "não estava instalado".
+- **Comando do fabricante (exceção controlada):**
+  - **é código do fabricante rodando como administrador.** As regras impedem
+    ferramentas do sistema e pastas onde um usuário comum consegue gravar, mas não dizem
+    se o desinstalador é confiável. A assinatura fica só registrada, porque muitos
+    desinstaladores não são assinados; o do 7-Zip, por exemplo, não é;
+  - **pode reiniciar a máquina,** e o sistema não tem como impedir;
+  - **um desinstalador que pede confirmação** trava, porque ninguém vê a janela, até o
+    tempo limite. Se ele já tiver se copiado para a pasta temporária, o processo filho
+    pode continuar na máquina;
+  - **o sucesso é pelo registro:** a chave pode sair e deixar arquivos para trás, ou um
+    desinstalador ruim pode tirar a chave sem remover o programa.
 - **Produto fora do catálogo:** o sistema confere o ProductCode, mas não tem como saber
   se o produto é crítico (antivírus, agente de gerenciamento, biblioteca de outro
   programa). Por isso o aviso e a confirmação obrigatória.
