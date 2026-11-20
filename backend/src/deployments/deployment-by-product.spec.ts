@@ -235,11 +235,8 @@ describe('InventoryService.summary (lista agrupada para o assistente)', () => {
         ]),
       },
       software: {
-        findMany: jest
-          .fn()
-          // 1ª: marcação do catálogo para os códigos encontrados; 2ª: MSI do catálogo não encontrados.
-          .mockResolvedValueOnce([{ id: 'sw-zip', name: '7-Zip', version: '26.06', active: true, msiProductCode: ZIP }])
-          .mockResolvedValueOnce([{ id: 'sw-x', name: 'Outro MSI', version: '1', active: false, msiProductCode: '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}' }]),
+        // Marcação do catálogo para os códigos encontrados.
+        findMany: jest.fn().mockResolvedValue([{ id: 'sw-zip', name: '7-Zip', version: '26.06', active: true, msiProductCode: ZIP }]),
       },
     };
     return { prisma, service: new InventoryService(prisma as never, {} as never) };
@@ -255,7 +252,7 @@ describe('InventoryService.summary (lista agrupada para o assistente)', () => {
     ]);
   });
 
-  it('máquinas sem inventário e com inventário antigo (> 7 dias); MSI do catálogo não encontrados', async () => {
+  it('máquinas sem inventário e com inventário antigo (> 7 dias); só o que o inventário encontrou', async () => {
     const { service } = setup();
     const s = await service.summary([M1, M2, M3], NOW);
     expect(s.staleAfterDays).toBe(7);
@@ -264,9 +261,9 @@ describe('InventoryService.summary (lista agrupada para o assistente)', () => {
       ['WS-FIN-001', true, true],
       ['WS-RH-005', false, false],
     ]);
-    expect(s.catalogNotFound).toEqual([
-      { softwareId: 'sw-x', name: 'Outro MSI', version: '1', active: false, productCode: '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}' },
-    ]);
+    expect(s).not.toHaveProperty('catalogNotFound');
+    // Uma consulta só ao catálogo: a marcação dos códigos encontrados.
+    expect((service as unknown as { prisma: { software: { findMany: jest.Mock } } }).prisma.software.findMany).toHaveBeenCalledTimes(1);
   });
 
   it('máquina que não existe mais: 404', async () => {

@@ -106,7 +106,7 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
   - Os itens que não são MSI aparecem desativados.
   - Máquinas sem inventário, ou com inventário de mais de 7 dias, geram um aviso e o
     botão "Consultar agora".
-  - Os MSI do catálogo que nenhum inventário encontrou ficam numa seção à parte.
+  - Aparece só o que o inventário encontrou, como no painel da máquina.
 - **De onde vem o ProductCode:**
   - **MSI do catálogo:** é lido pelo servidor do próprio pacote, no envio, com o pacote
     aberto só para leitura.

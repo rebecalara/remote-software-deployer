@@ -230,9 +230,7 @@ export function NewDeploymentPage() {
       setCreated(
         await createDeployment(
           uninstall
-            ? target!.source === 'inventory'
-              ? { action, productCode: target!.productCode, machineIds }
-              : { action, softwareId: target!.softwareId!, machineIds }
+            ? { action, productCode: target!.productCode, machineIds }
             : { action, softwareId: chosen!.id, machineIds },
         ),
       );

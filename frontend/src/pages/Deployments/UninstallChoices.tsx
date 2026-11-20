@@ -3,7 +3,7 @@ import { CheckCircleIcon, RefreshIcon, SearchIcon } from '../../components/icons
 import type { InventorySummary } from '../../types/inventory';
 import { formatDateTime } from '../../utils/format';
 import { OutsideCatalogBadge } from './deploymentUi';
-import { fromCatalog, fromInventory, machinesToConsult, type UninstallTarget } from './uninstallTarget';
+import { fromInventory, machinesToConsult, type UninstallTarget } from './uninstallTarget';
 import { EmptyState, plural } from './wizardParts';
 
 export interface ConsultProgress {
@@ -45,7 +45,6 @@ export function UninstallChoices({
   const matches = (...values: Array<string | null>) => !term || values.some((v) => v?.toLowerCase().includes(term));
 
   const products = (summary?.products ?? []).filter((p) => matches(p.name, p.publisher, p.version, p.productCode));
-  const catalogNotFound = (summary?.catalogNotFound ?? []).filter((c) => matches(c.name, c.version, c.productCode));
 
   if (loadError) {
     return (
@@ -190,43 +189,6 @@ export function UninstallChoices({
         })}
       </div>
 
-      {catalogNotFound.length > 0 && (
-        <div>
-          <h3 className="text-sm font-semibold text-slate-800">Do catálogo, não encontrados no inventário</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            Podem estar numa máquina sem inventário. As máquinas que não tiverem o produto terminam como "não estava
-            instalado".
-          </p>
-          <div role="radiogroup" aria-label="Do catálogo" className="mt-2 grid gap-2 lg:grid-cols-2" data-testid="catalog-not-found">
-            {catalogNotFound.map((c) => {
-              const target = fromCatalog(c);
-              const selected = target.key === selectedKey;
-              return (
-                <button
-                  key={c.softwareId}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => onSelect(target)}
-                  className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm ${
-                    selected ? 'border-blue-500 bg-blue-50/70 ring-1 ring-blue-500' : 'border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="shrink-0 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] text-blue-700">MSI</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-semibold text-slate-900">{c.name}</span>
-                    <span className="block text-xs text-slate-500">
-                      <span className="font-mono">{c.version}</span>
-                      {!c.active && ' · desativado no catálogo'}
-                    </span>
-                  </span>
-                  {selected && <CheckCircleIcon className="h-5 w-5 shrink-0 text-blue-700" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

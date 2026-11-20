@@ -63,8 +63,6 @@ export interface InventorySummary {
   staleAfterDays: number;
   machines: Array<{ id: string; hostname: string; seenInLastSync: boolean; inventoryAt: string | null; stale: boolean }>;
   products: InventoryProductGroup[];
-  /** MSI do catálogo que nenhum inventário das máquinas selecionadas encontrou. */
-  catalogNotFound: Array<{ softwareId: string; name: string; version: string; active: boolean; productCode: string }>;
 }
 
 /** GET /machines/:id/inventory: a última consulta e se dá para consultar de novo aqui. */
@@ -207,9 +205,9 @@ export class InventoryService {
    * Desinstalação pelo inventário: o software instalado nas máquinas selecionadas,
    * agrupado (MSI pelo ProductCode; o resto por nome e versão), com quantas delas têm
    * cada item, a partir da ÚLTIMA consulta guardada de cada máquina. Também: máquinas sem
-   * inventário ou com inventário antigo (mais de INVENTORY_STALE_DAYS dias) e os MSI do
-   * catálogo que nenhum inventário encontrou (podem estar numa máquina sem consulta).
-   * Só leitura — nada é consultado ao vivo aqui.
+   * inventário ou com inventário antigo (mais de INVENTORY_STALE_DAYS dias). Só o que o
+   * inventário encontrou, como no painel da máquina (decisão da autora). Só leitura —
+   * nada é consultado ao vivo aqui.
    */
   async summary(machineIds: string[], now: Date = new Date()): Promise<InventorySummary> {
     const [machines, aggregate, inventories] = await Promise.all([
@@ -260,12 +258,6 @@ export class InventoryService {
       }))
       .sort((a, b) => b.machineIds.length - a.machineIds.length || a.name.localeCompare(b.name, 'pt-BR'));
 
-    const foundCodes = [...groups.values()].map((g) => g.productCode).filter((c): c is string => !!c);
-    const catalogNotFound = await this.prisma.software.findMany({
-      where: { installType: InstallType.MSI, msiProductCode: { not: null, notIn: foundCodes } },
-      select: { id: true, name: true, version: true, active: true, msiProductCode: true },
-      orderBy: [{ name: 'asc' }, { version: 'asc' }],
-    });
 
     return {
       staleAfterDays: INVENTORY_STALE_DAYS,
@@ -282,13 +274,6 @@ export class InventoryService {
         })
         .sort((a, b) => a.hostname.localeCompare(b.hostname)),
       products,
-      catalogNotFound: catalogNotFound.map((s) => ({
-        softwareId: s.id,
-        name: s.name,
-        version: s.version,
-        active: s.active,
-        productCode: s.msiProductCode!,
-      })),
     };
   }
 }

@@ -47,8 +47,6 @@ export interface InventorySummary {
   staleAfterDays: number;
   machines: Array<{ id: string; hostname: string; seenInLastSync: boolean; inventoryAt: string | null; stale: boolean }>;
   products: InventoryProductGroup[];
-  /** MSI do catálogo que nenhum inventário das máquinas selecionadas encontrou. */
-  catalogNotFound: Array<{ softwareId: string; name: string; version: string; active: boolean; productCode: string }>;
 }
 
 /** GET /machines/:id/inventory */

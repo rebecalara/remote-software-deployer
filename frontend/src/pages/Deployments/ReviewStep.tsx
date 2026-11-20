@@ -115,7 +115,7 @@ function MachineList({ machines }: { machines: Machine[] }) {
 
 /** Revisão da desinstalação (só MSI): nada é copiado; só o ProductCode vai para a máquina. */
 function UninstallReview({ machines, target }: { machines: Machine[]; target: UninstallTarget }) {
-  const others = target.machinesWith === null ? null : machines.length - target.machinesWith;
+  const others = machines.length - target.machinesWith;
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -142,9 +142,7 @@ function UninstallReview({ machines, target }: { machines: Machine[]; target: Un
             </Field>
             <Field label="Nas máquinas">
               <span data-testid="coverage">
-                {target.machinesWith === null
-                  ? 'Nenhum inventário das máquinas selecionadas encontrou o produto.'
-                  : `Segundo o inventário, ${target.machinesWith} de ${plural(machines.length, 'máquina', 'máquinas')}${
+                {`Segundo o inventário, ${target.machinesWith} de ${plural(machines.length, 'máquina', 'máquinas')}${
                       others === 1
                         ? '; a outra deve terminar como "não estava instalado"'
                         : others
@@ -177,9 +175,7 @@ function UninstallReview({ machines, target }: { machines: Machine[]; target: Un
               {uninstallCommandText({ msiProductCode: target.productCode })}
             </pre>
             <p className="mt-1.5 text-xs text-slate-500">
-              {target.source === 'inventory'
-                ? 'O ProductCode vem do software instalado lido das máquinas (inventário guardado). '
-                : 'O ProductCode foi lido pelo servidor do próprio pacote MSI, no envio. '}
+              O ProductCode vem do software instalado lido das máquinas (inventário guardado).{' '}
               Nenhum argumento do catálogo é usado, e REBOOT=ReallySuppress vai sempre por último.
             </p>
           </div>
