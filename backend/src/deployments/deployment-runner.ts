@@ -13,6 +13,28 @@ export const RESTART_MESSAGE_RUNNING =
 export const RESTART_MESSAGE_PENDING =
   'Não executada: o servidor foi reiniciado antes de chegar a vez desta máquina.';
 
+/** Uma máquina terminou uma implantação em que algo pode ter mudado nela. */
+export interface MachineChangedEvent {
+  machineId: string;
+  hostname: string;
+  /** Quem pediu a implantação. */
+  userId: string;
+}
+
+/**
+ * Algo pode ter mudado na máquina? Sim para todo sucesso (inclusive "já instalado" e "não
+ * estava instalado") e para a falha depois de o instalador/desinstalador ter rodado
+ * (código de saída, tempo esgotado, "ainda registrado", processo do PowerShell travado).
+ * Não para falha antes de executar: entrada inválida, DNS, sem resposta, WinRM recusado,
+ * acesso negado, cópia, hash, comando alterado ou recusado.
+ */
+export function mayHaveChangedMachine(result: DeployResult): boolean {
+  if (!('reason' in result)) return true;
+  if (result.exitCode !== undefined && result.exitCode !== null) return true;
+  if (result.phase === 'install' || result.phase === 'uninstall' || result.phase === 'confirm') return true;
+  return result.reason === 'watchdog-timeout';
+}
+
 /**
  * Executa as implantações em segundo plano (DECISIONS.md, Bloco 4). Cada máquina é um
  * item da fila em memória; para cada uma: marca RUNNING, roda o executor, grava cada
@@ -27,6 +49,7 @@ export const RESTART_MESSAGE_PENDING =
 export class DeploymentRunner implements OnApplicationBootstrap {
   private readonly logger = new Logger(DeploymentRunner.name);
   private readonly queue: TargetQueue;
+  private readonly machineChangedListeners: Array<(event: MachineChangedEvent) => void> = [];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -40,6 +63,14 @@ export class DeploymentRunner implements OnApplicationBootstrap {
 
   enqueue(items: QueueItem[]): void {
     this.queue.enqueue(items);
+  }
+
+  /**
+   * Avisado (sem esperar) quando uma máquina termina uma implantação em que algo pode ter
+   * mudado nela. Usado pelo inventário (InventoryModule) para refazer a consulta.
+   */
+  onMachineChanged(listener: (event: MachineChangedEvent) => void): void {
+    this.machineChangedListeners.push(listener);
   }
 
   /** Para testes: resolve quando a fila esvazia. */
@@ -179,6 +210,9 @@ export class DeploymentRunner implements OnApplicationBootstrap {
         where: { id: targetId },
         data: { status: outcome.status, finishedAt: new Date(), exitCode: outcome.exitCode },
       });
+      if (mayHaveChangedMachine(result)) {
+        this.notifyMachineChanged({ machineId: target.machineId, hostname, userId: d.userId });
+      }
     } catch (err) {
       this.logger.error(`Falha inesperada ao executar o alvo ${targetId}: ${(err as Error).message}`);
       await this.markFailedQuietly(targetId, log);
@@ -211,6 +245,17 @@ export class DeploymentRunner implements OnApplicationBootstrap {
       return 'O arquivo do instalador não foi encontrado na pasta de instaladores do servidor.';
     } catch (err) {
       return `Não foi possível acessar o instalador no servidor: ${(err as Error).message}`;
+    }
+  }
+
+  /** Nunca lança nem atrasa a implantação: o ouvinte roda por conta própria. */
+  private notifyMachineChanged(event: MachineChangedEvent): void {
+    for (const listener of this.machineChangedListeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        this.logger.warn(`Aviso de máquina alterada (${event.hostname}) falhou: ${(err as Error).message}`);
+      }
     }
   }
 

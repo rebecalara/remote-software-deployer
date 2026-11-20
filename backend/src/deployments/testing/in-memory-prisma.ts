@@ -17,6 +17,8 @@ export interface TargetRow {
 export interface DeploymentRow {
   id: string;
   softwareId: string;
+  /** Quem pediu (opcional nos testes antigos). */
+  userId?: string;
   status: DeploymentStatus;
   startedAt: Date | null;
   finishedAt: Date | null;

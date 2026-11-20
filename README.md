@@ -84,7 +84,7 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 | RF05 | Executar instalação remota | ✅ Fila com até 10 máquinas em paralelo e uma instalação por vez em cada máquina. Validado numa VM de laboratório (ver [Limitações](#limitações-conhecidas)). |
 | RF06 | Acompanhar status | ✅ Monitoramento com as implantações em andamento e as encerradas nas últimas 24 h. Cada uma expande na própria linha, com a fase de cada máquina (conectando, copiando, conferindo o hash, instalando…), atualizada a cada 3 s. |
 | RF07 | Histórico de instalações | ✅ Implantações encerradas, com filtros por período, ação, status, software, máquina e "Minhas implantações", e paginação. Os filtros ficam no link. |
-| RF08 | Inventário de software instalado por máquina | ✅ No painel da máquina: consulta ao vivo pelo WinRM, só de leitura, com nome, versão, fabricante, data de instalação e ProductCode. Os MSI do catálogo aparecem marcados, com atalho para desinstalar. A última consulta fica guardada, com data e quem consultou. |
+| RF08 | Inventário de software instalado por máquina | ✅ No painel da máquina: consulta ao vivo pelo WinRM, só de leitura, com nome, versão, fabricante, data de instalação e ProductCode. Os MSI do catálogo aparecem marcados, com atalho para desinstalar. A última consulta fica guardada, com data e quem consultou, e é refeita sozinha depois de cada implantação na máquina. |
 | RF09 | Registrar resultado | ✅ Status e código de saída por máquina. Os códigos do Windows Installer (1603, 1618…) aparecem com mensagem explicativa. |
 | RF10 | Mensagens de sucesso e falha | ✅ Cada falha diz a fase e o motivo (máquina não encontrada, WinRM recusado, acesso negado, hash diferente, tempo esgotado…). |
 | RF11 | Pesquisar e filtrar máquinas | ✅ Busca por nome, sistema ou setor; filtro por setor e por presença no AD. |
@@ -376,7 +376,9 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   se o produto é crítico (antivírus, agente de gerenciamento, biblioteca de outro
   programa). Por isso o aviso e a confirmação obrigatória.
 - **Inventário:**
-  - **é uma foto:** a lista mostra o momento da consulta, com data e quem consultou;
+  - **é uma foto:** a lista mostra o momento da consulta, com data e quem consultou. Depois
+    de cada implantação que pode ter mudado a máquina, o sistema refaz a consulta sozinho,
+    em segundo plano; se ela falhar, a foto anterior continua;
   - **programas instalados só para um usuário não aparecem:** eles ficam no perfil
     desse usuário, e a sessão WinRM roda com a conta de serviço;
   - **a marcação "no catálogo" vale só para MSI,** pelo ProductCode. Um EXE não tem

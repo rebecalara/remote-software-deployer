@@ -7,9 +7,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InstallType, Prisma } from '@prisma/client';
+import { DeploymentRunner, MachineChangedEvent } from '../deployments/deployment-runner';
 import { InventoryFailureReason, InventoryItem, PowerShellExecutor } from '../deployments/powershell-executor';
 import {
   VENDOR_UNINSTALL_DISABLED,
@@ -131,15 +134,90 @@ export function inventoryFailureToHttp(reason: InventoryFailureReason, message: 
 }
 
 @Injectable()
-export class InventoryService {
+export class InventoryService implements OnModuleInit {
   private readonly logger = new Logger(InventoryService.name);
   /** Máquinas com consulta em andamento (uma por máquina; no máximo 5 no total). */
   private readonly running = new Set<string>();
+  /**
+   * Consultas automáticas (depois de uma implantação) esperando vaga no limite de 5:
+   * máquina → quem pediu a implantação. Uma por máquina; a mais recente vale.
+   */
+  private readonly refreshWaiting = new Map<string, MachineChangedEvent>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly executor: PowerShellExecutor,
+    @Optional() private readonly runner?: DeploymentRunner,
   ) {}
+
+  onModuleInit(): void {
+    this.runner?.onMachineChanged((event) => this.refreshAfterDeployment(event));
+  }
+
+  /**
+   * Refaz a consulta da máquina depois de uma implantação, em segundo plano: não atrasa
+   * nem muda o resultado da implantação. Respeita a trava por máquina (com consulta em
+   * andamento, não duplica) e o limite de consultas simultâneas (sem vaga, espera a
+   * próxima). Falha só vai para o log do servidor, e a última foto boa continua.
+   * Sem consulta remota neste servidor (modo demonstração), não faz nada.
+   */
+  refreshAfterDeployment(event: MachineChangedEvent): void {
+    if (!this.executor.isInventoryAvailable) return;
+    if (this.running.has(event.machineId)) return;
+    if (this.running.size >= MAX_CONCURRENT_INVENTORIES) {
+      this.refreshWaiting.set(event.machineId, event);
+      return;
+    }
+    void this.runRefresh(event);
+  }
+
+  /** Para testes: resolve quando nenhuma consulta automática está rodando nem esperando. */
+  async whenRefreshIdle(): Promise<void> {
+    while (this.running.size > 0 || this.refreshWaiting.size > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  }
+
+  private async runRefresh(event: MachineChangedEvent): Promise<void> {
+    this.running.add(event.machineId);
+    try {
+      const result = await this.executor.inventory(event.hostname);
+      if ('reason' in result) {
+        this.logger.warn(
+          `Inventário automático de ${event.hostname} (depois da implantação) falhou: ${result.reason} — ${result.message}`,
+        );
+        return;
+      }
+      await this.save(event.machineId, event.userId, result.items);
+      this.logger.log(`Inventário de ${event.hostname} atualizado depois da implantação: ${result.items.length} itens.`);
+    } catch (err) {
+      this.logger.warn(`Inventário automático de ${event.hostname} falhou: ${(err as Error).message}`);
+    } finally {
+      this.running.delete(event.machineId);
+      this.startWaitingRefresh();
+    }
+  }
+
+  /** Libera a próxima consulta automática que esperava vaga (pulando máquina já em consulta). */
+  private startWaitingRefresh(): void {
+    for (const [machineId, event] of this.refreshWaiting) {
+      if (this.running.size >= MAX_CONCURRENT_INVENTORIES) return;
+      if (this.running.has(machineId)) continue;
+      this.refreshWaiting.delete(machineId);
+      void this.runRefresh(event);
+    }
+  }
+
+  private save(machineId: string, userId: string, items: InventoryItem[]) {
+    const collectedAt = new Date();
+    const json = items as unknown as Prisma.InputJsonValue;
+    return this.prisma.machineInventory.upsert({
+      where: { machineId },
+      create: { machineId, collectedAt, collectedById: userId, items: json },
+      update: { collectedAt, collectedById: userId, items: json },
+      include: { collectedBy: { select: { username: true, displayName: true } } },
+    });
+  }
 
   async latest(machineId: string): Promise<InventoryState> {
     const machine = await this.prisma.machine.findUnique({ where: { id: machineId }, select: { id: true } });
@@ -184,26 +262,22 @@ export class InventoryService {
       );
     }
 
+    // A consulta manual vale pela automática que esperava vaga para a mesma máquina.
+    this.refreshWaiting.delete(machineId);
     this.running.add(machineId);
     let result: Awaited<ReturnType<PowerShellExecutor['inventory']>>;
     try {
       result = await this.executor.inventory(machine.hostname);
     } finally {
       this.running.delete(machineId);
+      this.startWaitingRefresh();
     }
     if ('reason' in result) {
       this.logger.warn(`Inventário de ${machine.hostname} (por ${username}) falhou: ${result.reason} — ${result.message}`);
       throw inventoryFailureToHttp(result.reason, result.message);
     }
 
-    const collectedAt = new Date();
-    const items = result.items as unknown as Prisma.InputJsonValue;
-    const row = await this.prisma.machineInventory.upsert({
-      where: { machineId },
-      create: { machineId, collectedAt, collectedById: userId, items },
-      update: { collectedAt, collectedById: userId, items },
-      include: { collectedBy: { select: { username: true, displayName: true } } },
-    });
+    const row = await this.save(machineId, userId, result.items);
     this.logger.log(`Inventário de ${machine.hostname} consultado por ${username}: ${result.items.length} itens.`);
     return this.toView(row);
   }
