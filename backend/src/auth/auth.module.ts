@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { LdapModule } from '../ldap/ldap.module';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
+import { LoginRateLimiter } from './login-rate-limiter';
 
 const JWT_SIGN_OPTIONS = {
   expiresIn: process.env.JWT_EXPIRES_IN || '8h',
@@ -19,7 +20,7 @@ const JWT_SIGN_OPTIONS = {
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, JwtAuthGuard, RolesGuard, LoginRateLimiter],
   // JwtModule exportado para que os guards funcionem nos módulos que importarem o AuthModule.
   exports: [JwtModule, JwtAuthGuard, RolesGuard],
 })

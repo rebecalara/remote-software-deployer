@@ -1,4 +1,4 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LdapAuthenticationError, LdapConnectionError, LdapService } from '../ldap/ldap.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -70,8 +70,26 @@ describe('AuthService', () => {
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('retorna o mesmo 401 genérico quando o servidor LDAP está inacessível', async () => {
-    ldapService.bind.mockRejectedValue(new LdapConnectionError('ECONNREFUSED'));
+  it.each([
+    ['conexão recusada', 'connect ECONNREFUSED 127.0.0.1:389'],
+    ['tempo esgotado', 'connection timeout'],
+  ])('AD indisponível (%s): 503 "serviço de autenticação indisponível", não 401', async (_caso, message) => {
+    ldapService.bind.mockRejectedValue(new LdapConnectionError(message));
+
+    const err = await service.login('lrebeca', 'qualquer').catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.message).toBe('Serviço de autenticação indisponível. Tente novamente em instantes.');
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('usuário inexistente no AD continua 401 genérico (o AD responde credencial inválida)', async () => {
+    ldapService.bind.mockRejectedValue(new LdapAuthenticationError('InvalidCredentialsError: 80090308 data 52e'));
+
+    await expect(service.login('nao-existe', 'qualquer')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('erro inesperado (nem conexão nem credencial) continua 401 genérico', async () => {
+    ldapService.bind.mockRejectedValue(new Error('algo estranho'));
 
     await expect(service.login('lrebeca', 'qualquer')).rejects.toThrow(UnauthorizedException);
   });

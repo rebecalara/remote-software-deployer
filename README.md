@@ -168,6 +168,12 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
   tem cadastro de senha, e a senha digitada é usada só para o bind e descartada. O perfil
   de acesso (ADMIN, OPERATOR ou VIEWER) vem do banco do sistema: só entra quem foi
   cadastrado.
+- **Limite de tentativas de login:** no máximo 5 por IP em 15 minutos; a sexta recebe 429,
+  com o tempo de espera, sem chegar ao AD. Protege contra força bruta e contra o bloqueio
+  das contas no AD. Não contam o login com sucesso nem o AD fora do ar, que responde 503
+  ("serviço de autenticação indisponível"). Atrás do Caddy, o IP vem do
+  `X-Forwarded-For`, aceito só quando a conexão chega de 127.0.0.1 (o próprio Caddy); de
+  qualquer outro endereço o cabeçalho é ignorado, porque seria falsificável.
 - **Nenhuma execução arbitrária.** O script de instalação é fixo e versionado
   ([`backend/scripts/deploy-target.ps1`](backend/scripts/deploy-target.ps1)), nunca
   montado como texto.
@@ -403,6 +409,5 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   demanda.
 - **Implantação em ambiente demonstrável** para a banca: nuvem com o AD fictício e a
   implantação ao vivo pelo notebook com a VM.
-- **Sessão em cookie `httpOnly`** em vez de `sessionStorage`, e limite de tentativas de
-  login quando houver exposição fora da rede interna.
+- **Sessão em cookie `httpOnly`** em vez de `sessionStorage`.
 - **Integração contínua** (lint e testes) no GitHub Actions.

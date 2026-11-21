@@ -1,10 +1,18 @@
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { LdapAuthenticationError, LdapConnectionError, LdapService } from '../ldap/ldap.service';
 import { JwtPayload, LoginResponse } from './auth.types';
 
 const GENERIC_AUTH_ERROR = 'Usuário ou senha inválidos.';
+/** AD fora do ar ou sem resposta: 503, e não conta no limite de tentativas de login. */
+export const AUTH_UNAVAILABLE_ERROR = 'Serviço de autenticação indisponível. Tente novamente em instantes.';
 
 @Injectable()
 export class AuthService {
@@ -70,6 +78,9 @@ export class AuthService {
         this.logger.error(
           `Falha de conexão com o LDAP ao autenticar "${username}": ${err.message}`,
         );
+        // Não é erro de credencial: a pessoa não errou nada, e o 401 a faria tentar de
+        // novo (e gastar o limite de tentativas) com a senha certa.
+        throw new ServiceUnavailableException(AUTH_UNAVAILABLE_ERROR);
       } else if (err instanceof LdapAuthenticationError) {
         this.logger.warn(`Bind LDAP rejeitado para "${username}": ${err.message}`);
       } else {
