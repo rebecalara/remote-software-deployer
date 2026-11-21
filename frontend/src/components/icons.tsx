@@ -74,6 +74,9 @@ export function TrashIcon(props: IconProps) {
 export function PowerIcon(props: IconProps) {
   return <Svg {...props}><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></Svg>;
 }
+export function XCircleIcon(props: IconProps) {
+  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6" /><path d="M9 9l6 6" /></Svg>;
+}
 export function CheckCircleIcon(props: IconProps) {
   return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></Svg>;
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { DeploymentAction, DeploymentCounts, DeploymentStatus, DeploymentSummary } from '../../types/deployment';
 
 // Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
@@ -25,25 +26,48 @@ export function StatusBadge({ status }: { status: DeploymentStatus }) {
   );
 }
 
+type CounterTone = 'slate' | 'blue' | 'green' | 'red';
+
+/** Fundo suave e cor do ícone de cada tom (Dashboard). */
+const COUNTER_ICON_STYLE: Record<CounterTone, string> = {
+  slate: 'bg-slate-100 text-slate-600',
+  blue: 'bg-blue-50 text-blue-600',
+  green: 'bg-emerald-50 text-emerald-600',
+  red: 'bg-red-50 text-red-600',
+};
+
 export function Counter({
   label,
   value,
   tone = 'slate',
   detail,
+  icon,
 }: {
   label: string;
   value: number;
-  tone?: 'slate' | 'blue' | 'green' | 'red';
+  tone?: CounterTone;
   detail?: string;
+  /** Ícone num quadrado com fundo suave da cor do tom (usado no Dashboard). */
+  icon?: ReactNode;
 }) {
   const color = { slate: 'text-slate-900', blue: 'text-blue-700', green: 'text-emerald-700', red: 'text-red-700' }[tone];
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <p className={`text-2xl font-bold tabular-nums ${color}`}>{value}</p>
-      <p className="text-xs font-medium text-slate-500">
-        {label}
-        {detail && <span className="text-slate-400"> · {detail}</span>}
-      </p>
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="min-w-0">
+        <p className={`text-2xl font-bold tabular-nums ${color}`}>{value}</p>
+        <p className="text-xs font-medium text-slate-500">
+          {label}
+          {detail && <span className="text-slate-400"> · {detail}</span>}
+        </p>
+      </div>
+      {icon && (
+        <span
+          data-testid="counter-icon"
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${COUNTER_ICON_STYLE[tone]}`}
+        >
+          {icon}
+        </span>
+      )}
     </div>
   );
 }

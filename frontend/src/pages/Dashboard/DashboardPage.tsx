@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { RefreshIcon } from '../../components/icons';
+import { ActivityIcon, CheckCircleIcon, MonitorIcon, RefreshIcon, XCircleIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
 import { SessionExpiredError } from '../../services/apiClient';
@@ -84,19 +84,27 @@ export function DashboardPage() {
         <Counter
           label="Máquinas cadastradas"
           value={machines.total}
+          icon={<MonitorIcon className="h-5 w-5" />}
           detail={machines.lastSyncAt ? `${machines.seenInLastSync} presentes na última sincronização` : 'ainda não sincronizado'}
         />
         <Counter
           label="Implantações ativas"
           value={dep.activeDeployments}
           tone="blue"
+          icon={<ActivityIcon className="h-5 w-5" />}
           detail={dep.pendingTargets > 0 ? `${dep.pendingTargets} ${dep.pendingTargets === 1 ? 'máquina' : 'máquinas'} na fila` : undefined}
         />
-        <Counter label={`Concluídas (${dep.windowHours} h)`} value={w.succeeded} tone="green" />
+        <Counter
+          label={`Concluídas (${dep.windowHours} h)`}
+          value={w.succeeded}
+          tone="green"
+          icon={<CheckCircleIcon className="h-5 w-5" />}
+        />
         <Counter
           label={`Com falha (${dep.windowHours} h)`}
           value={w.failed}
           tone="red"
+          icon={<XCircleIcon className="h-5 w-5" />}
           detail={dep.failureRate !== null ? `${percent(dep.failureRate)} de taxa de falha` : undefined}
         />
       </div>

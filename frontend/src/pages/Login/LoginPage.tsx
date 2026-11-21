@@ -3,12 +3,15 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
 import { EyeIcon, EyeOffIcon } from '../../components/icons';
+import { safeRedirectPath } from '../../routes/safeRedirect';
 
 export function LoginPage() {
   const { login, isAuthenticated, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/dashboard';
+  // Página para voltar (sessão expirada ou link direto), só se for caminho interno; senão,
+  // e depois de "Sair" ou abrindo /login direto, o Dashboard.
+  const from = safeRedirectPath((location.state as { from?: unknown } | null)?.from);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -51,10 +54,6 @@ export function LoginPage() {
             Remote Software
             <span className="block font-bold text-blue-400">Deployer</span>
           </h2>
-
-          <p className="mt-5 max-w-md text-base text-balance text-slate-400">
-            Implantação remota de software nas estações da Prefeitura
-          </p>
         </div>
 
         {/* Absoluto para não empurrar o conteúdo: assim ele fica no centro exato do painel */}

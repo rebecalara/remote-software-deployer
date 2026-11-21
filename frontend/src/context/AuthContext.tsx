@@ -24,6 +24,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   /** true quando a sessão acabou por 401/expiração (não por "Sair") — a tela de login avisa. */
   sessionExpired: boolean;
+  /** true depois de "Sair": o próximo login vai para o Dashboard, não para a página anterior. */
+  loggedOut: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -33,6 +35,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<StoredSession | null>(loadSession);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [loggedOut, setLoggedOut] = useState(false);
 
   // O apiClient encerra a sessão ao receber 401; aqui o React fica sabendo,
   // e o ProtectedRoute redireciona para /login.
@@ -41,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onSessionExpired(() => {
         setSession(null);
         setSessionExpired(true);
+        setLoggedOut(false);
       }),
     [],
   );
@@ -51,12 +55,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveSession(next);
     setSession(next);
     setSessionExpired(false);
+    setLoggedOut(false);
   }, []);
 
   const logout = useCallback(() => {
     clearSession();
     setSession(null);
     setSessionExpired(false);
+    setLoggedOut(true);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -65,10 +71,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: session?.token ?? null,
       isAuthenticated: session !== null && !isTokenExpired(session.token),
       sessionExpired,
+      loggedOut,
       login,
       logout,
     }),
-    [session, sessionExpired, login, logout],
+    [session, sessionExpired, loggedOut, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
