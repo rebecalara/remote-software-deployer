@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -237,6 +239,11 @@ export class SoftwareService implements OnApplicationBootstrap {
     }
 
     const saved = await this.storage.save(source, current.installType).catch((err) => {
+      if (isDiskFull(err)) {
+        // O .part já foi apagado pelo armazenamento; quem administra o servidor precisa saber.
+        const code = (err as NodeJS.ErrnoException).code;
+        this.logger.error(`Disco cheio ao gravar instalador (${code}): ${(err as Error).message}`);
+      }
       throw toHttpUploadError(err);
     });
     // MSI: o ProductCode é lido do próprio pacote, aqui no servidor, para a
@@ -405,9 +412,22 @@ function duplicateError(name: string, version: string): ConflictException {
   return new ConflictException(`Já existe um software "${name}" na versão "${version}".`);
 }
 
-/** Erros do armazenamento → resposta HTTP. Outros (conexão caída, disco cheio) seguem como estão. */
+export const DISK_FULL_MESSAGE = 'Sem espaço em disco no servidor para guardar o instalador.';
+
+/** Disco cheio (ENOSPC) ou cota de disco esgotada (EDQUOT, comum em volume de nuvem/Linux). */
+function isDiskFull(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOSPC' || code === 'EDQUOT';
+}
+
+/** Erros do armazenamento → resposta HTTP. Outros (ex.: conexão caída) seguem como estão. */
 function toHttpUploadError(err: unknown): unknown {
   if (err instanceof InstallerTooLargeError) return new PayloadTooLargeException(err.message);
+  // 507 Insufficient Storage: sem isto, chegava ao navegador como 500 "Internal server error".
+  if (isDiskFull(err)) {
+    const status = HttpStatus.INSUFFICIENT_STORAGE;
+    return new HttpException({ statusCode: status, message: DISK_FULL_MESSAGE }, status);
+  }
   if (err instanceof InvalidInstallerHeaderError) return new BadRequestException(err.message);
   if (err instanceof InstallerStorageUnavailableError) return new ServiceUnavailableException(err.message);
   return err;

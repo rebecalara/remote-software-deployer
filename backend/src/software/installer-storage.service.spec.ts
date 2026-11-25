@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -22,6 +23,20 @@ jest.mock('node:fs/promises', () => {
 });
 const realRename = jest.requireActual('node:fs/promises').rename;
 const renameMock = fsp.rename as unknown as jest.Mock;
+
+// Mesmo esquema para o createWriteStream: por padrão é o real; o teste de disco cheio troca
+// uma chamada por um stream de verdade (o .part existe no disco) cuja escrita falha com ENOSPC.
+jest.mock('node:fs', () => {
+  const actual = jest.requireActual('node:fs');
+  return { ...actual, createWriteStream: jest.fn(actual.createWriteStream) };
+});
+const realCreateWriteStream = jest.requireActual('node:fs').createWriteStream;
+const createWriteStreamMock = fs.createWriteStream as unknown as jest.Mock;
+
+/** Erro no formato do Node quando o disco enche durante a escrita. */
+function diskFullError(): NodeJS.ErrnoException {
+  return Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC', syscall: 'write' });
+}
 
 // Pastas SEMPRE temporárias do sistema, criadas e apagadas por cada teste —
 // nunca C:\rsd-data nem nada dentro do repositório.
@@ -82,6 +97,7 @@ describe('InstallerStorageService', () => {
 
   beforeEach(async () => {
     renameMock.mockReset().mockImplementation(realRename);
+    createWriteStreamMock.mockReset().mockImplementation(realCreateWriteStream);
     dir = await fsp.mkdtemp(join(tmpdir(), 'rsd-installers-test-'));
   });
 
@@ -215,6 +231,35 @@ describe('InstallerStorageService', () => {
 
       await expect(service.save(chunked(fakeInstaller(MZ, 5000)).stream, 'EXE')).rejects.toThrow('ENOSPC');
       expect(renameMock).toHaveBeenCalledTimes(1);
+      expect(await filesOnDisk()).toEqual([]);
+    });
+
+    it('disco cheio no meio da gravação (ENOSPC): o erro segue com o código e o .part é apagado', async () => {
+      const service = await createService();
+      // Stream de gravação real (cria o .part de verdade): o 1º pedaço é gravado, o 2º falha
+      // como falharia com o disco cheio. Nada enche o disco de verdade.
+      let partPath = '';
+      let partExistedAtFailure = false;
+      createWriteStreamMock.mockImplementationOnce((path: string, options: unknown) => {
+        partPath = path;
+        const stream = realCreateWriteStream(path, options);
+        const writeOne = stream._write.bind(stream);
+        let writes = 0;
+        stream._write = (chunk: Buffer, encoding: BufferEncoding, callback: (err?: Error | null) => void) => {
+          if (writes++ === 0) return writeOne(chunk, encoding, callback);
+          partExistedAtFailure = fs.existsSync(path);
+          callback(diskFullError());
+        };
+        stream._writev = undefined; // um pedaço por vez, para o 1º chegar ao disco
+        return stream;
+      });
+
+      const error = await service.save(chunked(fakeInstaller(MZ, 10 * CHUNK)).stream, 'EXE').catch((e) => e);
+
+      expect(error).toMatchObject({ code: 'ENOSPC' });
+      expect(partPath).toMatch(/\.tmp[\\/][0-9a-f-]{36}\.part$/);
+      expect(partExistedAtFailure).toBe(true);
+      expect(renameMock).not.toHaveBeenCalled();
       expect(await filesOnDisk()).toEqual([]);
     });
   });

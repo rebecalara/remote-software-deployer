@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
@@ -507,6 +508,31 @@ describe('SoftwareService', () => {
       prisma.software.findUnique.mockResolvedValue(null);
       await expect(service.uploadInstaller(ID, body(), 'x.exe', USER_ID)).rejects.toThrow(NotFoundException);
       expect(storage.save).not.toHaveBeenCalled();
+    });
+
+    it.each(['ENOSPC', 'EDQUOT'])(
+      'disco cheio (%s) no armazenamento → 507 com mensagem clara, sem tocar no banco',
+      async (code) => {
+        storage.save.mockRejectedValue(
+          Object.assign(new Error(`${code}: no space left on device, write`), { code, syscall: 'write' }),
+        );
+        const error = await service.uploadInstaller(ID, body(), 'x.exe', USER_ID).catch((e) => e);
+
+        expect(error).toBeInstanceOf(HttpException);
+        expect(error.getStatus()).toBe(507);
+        expect(error.getResponse()).toEqual({
+          statusCode: 507,
+          message: 'Sem espaço em disco no servidor para guardar o instalador.',
+        });
+        expect(prisma.software.updateMany).not.toHaveBeenCalled();
+        expect(msiReader.read).not.toHaveBeenCalled();
+      },
+    );
+
+    it('outro erro de disco (ex.: EACCES) não vira 507 — segue como está', async () => {
+      const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      storage.save.mockRejectedValue(denied);
+      await expect(service.uploadInstaller(ID, body(), 'x.exe', USER_ID)).rejects.toBe(denied);
     });
 
     it.each([
