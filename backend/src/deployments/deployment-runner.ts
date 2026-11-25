@@ -281,8 +281,14 @@ export class DeploymentRunner implements OnApplicationBootstrap {
   }
 }
 
+/** Linhas de log por máquina, no máximo (contando a linha de aviso). */
+export const LOG_LINES_PER_TARGET = 500;
+export const LOG_TRUNCATED_MESSAGE = `Log truncado: limite de ${LOG_LINES_PER_TARGET} linhas.`;
+
 /**
- * Grava os logs de um alvo em sequência, na ordem em que chegam. O timestamp é dado
+ * Grava os logs de um alvo em sequência, na ordem em que chegam. No máximo
+ * LOG_LINES_PER_TARGET linhas: a última vira o aviso "Log truncado…" e o resto é ignorado
+ * (o status e o código de saída da máquina continuam gravados no alvo). O timestamp é dado
  * aqui e nunca se repete (+1 ms se preciso): dois passos no mesmo milissegundo
  * ficariam em ordem indefinida na consulta por (alvo, timestamp). Uma falha ao gravar
  * um log não interrompe a instalação — só fica no log do servidor.
@@ -290,6 +296,7 @@ export class DeploymentRunner implements OnApplicationBootstrap {
 export class TargetLogWriter {
   private chain: Promise<void> = Promise.resolve();
   private lastTimestamp = 0;
+  private lines = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -298,6 +305,12 @@ export class TargetLogWriter {
   ) {}
 
   write(level: LogLevel, message: string): void {
+    if (this.lines >= LOG_LINES_PER_TARGET) return;
+    this.lines++;
+    if (this.lines === LOG_LINES_PER_TARGET) {
+      level = LogLevel.WARN;
+      message = LOG_TRUNCATED_MESSAGE;
+    }
     const timestamp = new Date(Math.max(Date.now(), this.lastTimestamp + 1));
     this.lastTimestamp = timestamp.getTime();
     this.chain = this.chain.then(async () => {
