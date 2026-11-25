@@ -45,10 +45,13 @@ describe('probePort (sockets de verdade, só na própria máquina)', () => {
     expect(Date.now() - t0).toBeLessThan(2000);
   });
 
-  it('endereço que não responde (192.0.2.1, reservado para documentação) → tempo esgotado no limite', async () => {
+  it('endereço que não responde (192.0.2.1, reservado para documentação) → sem resposta, dentro do limite', async () => {
     const t0 = Date.now();
     const result = await probePort('192.0.2.1', WINRM_PORT, 300);
-    expect(result).toEqual({ responding: false, outcome: 'timeout' });
+    // Em geral o pacote some (tempo esgotado); algumas redes (roteador, firewall do CI)
+    // recusam na hora. Os dois são "sem resposta" — o que importa é não passar do limite.
+    expect(result.responding).toBe(false);
+    expect(['timeout', 'refused']).toContain(result.outcome);
     expect(Date.now() - t0).toBeLessThan(2000);
   });
 

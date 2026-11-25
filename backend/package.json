@@ -9,6 +9,7 @@
     "build": "nest build",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:cov": "jest --coverage",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
@@ -29,7 +30,10 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.ts",
+      "!**/*.spec.ts",
+      "!**/testing/**",
+      "!**/*.d.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"

@@ -284,7 +284,9 @@ describe('PowerShellExecutor — protocolo da desinstalação', () => {
 });
 
 describe('deploy-target.ps1 — desinstalação', () => {
-  const text = readFileSync(DEPLOY_SCRIPT_PATH, 'utf8');
+  // CRLF → LF: num clone novo no Windows (core.autocrlf=true) o script chega com CRLF, e os
+  // trechos procurados abaixo usam "\n".
+  const text = readFileSync(DEPLOY_SCRIPT_PATH, 'utf8').replace(/\r\n/g, '\n');
 
   it('comando fixo: msiexec /x {ProductCode} /qn /norestart com REBOOT=ReallySuppress por ÚLTIMO', () => {
     expect(text).toContain("-ArgumentList @('/x', $Code, '/qn', '/norestart', 'REBOOT=ReallySuppress')");

@@ -141,15 +141,40 @@ describe('PowerShellExecutor (com processo falso)', () => {
   });
 
   it('encerra o processo que passa do limite geral', async () => {
-    const quick = new PowerShellExecutor(
-      fakeConfig({ connectTimeoutSeconds: 0, installTimeoutSeconds: 0, copyBaseSeconds: 0, watchdogMarginSeconds: 1 }),
-    );
-    const started = Date.now();
-    const { result, events } = await runWith(quick, input('FAKE-HANG', { installerSizeBytes: 0 }));
-    expect(Date.now() - started).toBeLessThan(5000);
-    expect(events).toHaveLength(1);
-    expect(result).toMatchObject({ ok: false, phase: 'executor', reason: 'watchdog-timeout' });
-    expect((result as { message: string }).message).toContain('confira a máquina');
+    // Relógio SIMULADO para o limite geral (1 s aqui): ele só "passa" depois que o processo
+    // falso já relatou o passo. Com o relógio real, a suíte inteira em paralelo às vezes fazia o
+    // Node levar mais de 1 s só para iniciar o processo falso — o limite estourava antes do passo
+    // e o teste falhava sem defeito nenhum. O processo, o stdout e o kill continuam reais.
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      const quick = new PowerShellExecutor(
+        fakeConfig({ connectTimeoutSeconds: 0, installTimeoutSeconds: 0, copyBaseSeconds: 0, watchdogMarginSeconds: 1 }),
+      );
+      const events: DeployEvent[] = [];
+      let stepReported!: () => void;
+      const step = new Promise<void>((resolve) => (stepReported = resolve));
+      let settled = false;
+      const running = quick
+        .run(input('FAKE-HANG', { installerSizeBytes: 0 }), (e) => {
+          events.push(e);
+          stepReported();
+        })
+        .finally(() => (settled = true));
+
+      await step; // o processo está vivo e travado depois do passo
+      jest.advanceTimersByTime(999);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false); // 1 ms antes do limite, nada é encerrado
+
+      jest.advanceTimersByTime(1);
+      const result = await running;
+      expect(events).toEqual([{ level: LogLevel.INFO, phase: 'install', message: 'Executando o instalador.' }]);
+      expect(result).toMatchObject({ ok: false, phase: 'executor', reason: 'watchdog-timeout' });
+      expect((result as { message: string }).message).toContain('(1 s)');
+      expect((result as { message: string }).message).toContain('confira a máquina');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('relata falha ao iniciar o processo', async () => {

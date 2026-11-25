@@ -363,11 +363,17 @@ describe('resolveStorageDir', () => {
     expect(resolveStorageDir(repoRoot)).toBeNull();
   });
 
+  // Caminhos absolutos FORA do repositório em cada sistema. No Linux (CI), "E:\Dados" não é
+  // absoluto: viraria uma pasta dentro do repositório e seria recusada por OUTRO motivo — o
+  // teste passaria (ou falharia) sem testar a regra do OneDrive.
+  const ABS =
+    process.platform === 'win32' ? { cloud: 'D:\\Nuvem\\MinhaPasta', data: 'E:\\Dados' } : { cloud: '/nuvem/minha-pasta', data: '/dados' };
+
   it('recusa pasta dentro do OneDrive (pela variável do Windows e pelo nome)', () => {
-    process.env = { ...ORIGINAL_ENV, OneDrive: 'D:\\Nuvem\\MinhaPasta' };
-    expect(resolveStorageDir('D:\\Nuvem\\MinhaPasta\\instaladores')).toBeNull();
-    expect(resolveStorageDir('E:\\Dados\\OneDrive - Empresa\\instaladores')).toBeNull();
-    expect(resolveStorageDir('E:\\Dados\\onedrive\\x')).toBeNull();
+    process.env = { ...ORIGINAL_ENV, OneDrive: ABS.cloud };
+    expect(resolveStorageDir(join(ABS.cloud, 'instaladores'))).toBeNull();
+    expect(resolveStorageDir(join(ABS.data, 'OneDrive - Empresa', 'instaladores'))).toBeNull();
+    expect(resolveStorageDir(join(ABS.data, 'onedrive', 'x'))).toBeNull();
   });
 
   it('não confunde nome parecido com OneDrive', () => {
@@ -375,7 +381,7 @@ describe('resolveStorageDir', () => {
     delete process.env.OneDrive;
     delete process.env.OneDriveConsumer;
     delete process.env.OneDriveCommercial;
-    expect(resolveStorageDir('E:\\Dados\\MeuOneDriveBackup\\x')).not.toBeNull();
+    expect(resolveStorageDir(join(ABS.data, 'MeuOneDriveBackup', 'x'))).toBe(resolve(join(ABS.data, 'MeuOneDriveBackup', 'x')));
   });
 });
 
