@@ -10,6 +10,17 @@ import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { SoftwareService } from '../software/software.service';
+import {
+  CsvValue,
+  DEPLOYMENT_STATUS_LABEL,
+  EXPORT_MAX_ROWS,
+  EXPORT_TOO_MANY,
+  exportFileName,
+  formatDateTimeSaoPaulo,
+  formatDurationText,
+  targetResultLabel,
+  toCsv,
+} from './deployment-export';
 import { DeploymentDisplayStatus, PARTIAL, displayStatus } from './deployment-outcome';
 import { DeploymentRunner } from './deployment-runner';
 import { DeploymentCreateInput, DeploymentListQuery, OUTSIDE_CATALOG } from './deployment-validation';
@@ -377,6 +388,62 @@ export class DeploymentsService {
       }),
     ]);
     return { items: rows.map(toSummaryView), total, page: query.page, pageSize: query.pageSize };
+  }
+
+  /**
+   * Histórico em CSV (Excel em português): as implantações que a listagem mostraria com os
+   * mesmos filtros (mesmo `deploymentListWhere`, inclusive "Minhas" pelo usuário do token),
+   * TODAS as páginas, uma linha por máquina, sem logs. Mais de EXPORT_MAX_ROWS linhas = 400:
+   * a contagem vem antes, para não ler as implantações à toa.
+   */
+  async exportCsv(query: DeploymentListQuery, requesterId: string, now: Date = new Date()): Promise<{ fileName: string; csv: string }> {
+    const where = deploymentListWhere(query, requesterId);
+    const rows = await this.prisma.deploymentTarget.count({ where: { deployment: where } });
+    if (rows > EXPORT_MAX_ROWS) {
+      throw new BadRequestException({ statusCode: 400, error: 'Bad Request', message: EXPORT_TOO_MANY });
+    }
+    const deployments = await this.prisma.deployment.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: {
+        software: { select: { name: true, version: true } },
+        user: { select: { username: true, displayName: true } },
+        targets: {
+          include: {
+            machine: { select: { hostname: true } },
+            // Só o último passo, para o "Resultado na máquina" ("Já estava instalado"…).
+            logs: { orderBy: { timestamp: 'desc' }, take: 1, select: { message: true } },
+          },
+        },
+      },
+    });
+
+    const lines: CsvValue[][] = [];
+    for (const d of deployments) {
+      const counts = countStatuses(d.targets.map((t) => t.status));
+      const status = DEPLOYMENT_STATUS_LABEL[displayStatus(d.status, counts)];
+      const software = d.software?.name ?? d.productName ?? d.productCode ?? '—';
+      const version = d.software ? d.software.version : (d.productVersion ?? '');
+      const targets = [...d.targets].sort((a, b) => a.machine.hostname.localeCompare(b.machine.hostname));
+      for (const t of targets) {
+        lines.push([
+          software,
+          version,
+          d.action === DeploymentAction.UNINSTALL ? 'Desinstalação' : 'Instalação',
+          d.software ? 'Não' : 'Sim',
+          status,
+          t.machine.hostname,
+          targetResultLabel({ status: t.status, exitCode: t.exitCode, lastMessage: t.logs[0]?.message ?? null }),
+          t.exitCode,
+          d.user.displayName || d.user.username,
+          formatDateTimeSaoPaulo(d.createdAt),
+          formatDateTimeSaoPaulo(t.startedAt),
+          formatDateTimeSaoPaulo(t.finishedAt),
+          formatDurationText(t.startedAt, t.finishedAt),
+        ]);
+      }
+    }
+    return { fileName: exportFileName(now), csv: toCsv(lines) };
   }
 
   /**

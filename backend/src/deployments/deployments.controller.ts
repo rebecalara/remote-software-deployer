@@ -10,9 +10,12 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import type { Response } from 'express';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -71,6 +74,24 @@ export class DeploymentsController {
   @Get('limits')
   limits(): { maxMachines: number } {
     return { maxMachines: this.maxMachines };
+  }
+
+  /**
+   * Histórico em CSV, com os MESMOS filtros e a mesma validação da listagem (?mine=true pelo
+   * usuário do token). Leitura para qualquer usuário logado; sem login, 401 (guard da classe).
+   * Uma linha por máquina; mais de 10.000 = 400. Também ANTES de @Get(':id').
+   */
+  @Get('export')
+  async exportCsv(
+    @Query() query: Record<string, unknown>,
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { fileName, csv } = await this.deploymentsService.exportCsv(parseDeploymentListQuery(query), req.user!.sub);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    // StreamableFile: um Buffer devolvido direto seria serializado como JSON pelo Nest.
+    return new StreamableFile(Buffer.from(csv, 'utf8'));
   }
 
   /** Leitura para qualquer usuário logado. A tela de acompanhamento consulta esta rota. */
