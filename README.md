@@ -78,10 +78,10 @@ clássicos de migração, o NestJS 12 só publica ESM e o TypeScript 7 quebra o 
 | RF | Requisito | Situação |
 |---|---|---|
 | RF01 | Autenticação | ✅ Login com a conta de rede, por bind LDAP no AD. Perfis ADMIN, OPERATOR e VIEWER. |
-| RF02 | Visualizar máquinas | ✅ Lista sincronizada com o AD, com nome, sistema operacional, setor (OU) e data da última confirmação no AD. |
-| RF03 | Selecionar máquinas | ✅ Seleção individual e "selecionar todas" respeitando a busca. Até 50 máquinas por implantação. |
+| RF02 | Visualizar máquinas | ✅ Lista sincronizada com o AD, com nome, sistema operacional, setor (OU) e data da última confirmação no AD. Status "Respondendo no WinRM" / "Sem resposta", por verificação periódica da porta 5985 (só teste de conexão) e pelo botão "Verificar agora". |
+| RF03 | Selecionar máquinas | ✅ Seleção individual e "selecionar todas" respeitando a busca e o filtro de setor. Até 50 máquinas por implantação, configurável em `DEPLOYMENT_MAX_MACHINES` (de 1 a 500). |
 | RF04 | Cadastrar softwares | ✅ Catálogo com MSI e EXE e argumentos silenciosos. O instalador é enviado ao sistema, que calcula o SHA-256. Desativar em vez de apagar o que já foi implantado. |
-| RF05 | Executar instalação remota | ✅ Fila com até 10 máquinas em paralelo e uma instalação por vez em cada máquina. Validado numa VM de laboratório (ver [Limitações](#limitações-conhecidas)). |
+| RF05 | Executar instalação remota | ✅ Fila com até 10 máquinas em paralelo e uma instalação por vez em cada máquina. Um pedido igual a uma implantação ainda pendente ou em andamento (mesma ação, mesmo software ou produto, alguma máquina em comum) é recusado, mesmo se os dois chegarem ao mesmo tempo. Validado numa VM de laboratório (ver [Limitações](#limitações-conhecidas)). |
 | RF06 | Acompanhar status | ✅ Monitoramento com as implantações em andamento e as encerradas nas últimas 24 h. Cada uma expande na própria linha, com a fase de cada máquina (conectando, copiando, conferindo o hash, instalando…), atualizada a cada 3 s. |
 | RF07 | Histórico de instalações | ✅ Implantações encerradas, com filtros por período, ação, status, software, máquina e "Minhas implantações", e paginação. Os filtros ficam no link. |
 | RF08 | Inventário de software instalado por máquina | ✅ No painel da máquina: consulta ao vivo pelo WinRM, só de leitura, com nome, versão, fabricante, data de instalação e ProductCode. Os MSI do catálogo aparecem marcados, com atalho para desinstalar. A última consulta fica guardada, com data e quem consultou, e é refeita sozinha depois de cada implantação na máquina. |
@@ -168,6 +168,17 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
   tem cadastro de senha, e a senha digitada é usada só para o bind e descartada. O perfil
   de acesso (ADMIN, OPERATOR ou VIEWER) vem do banco do sistema: só entra quem foi
   cadastrado.
+- **Token de sessão.** O JWT é assinado e verificado só em HS256 (um token em outro
+  algoritmo, inclusive `none`, é recusado). O backend não sobe sem `JWT_SECRET` com pelo
+  menos 32 caracteres.
+- **Login no AD.** O usuário não diferencia maiúsculas ("Rebeca" = "rebeca"): é convertido
+  para minúsculas antes do bind e da consulta à tabela `User`, onde fica sempre em
+  minúsculas. Só letras sem acento, dígitos, `.`, `_` e `-` (e `@`, quando a pessoa digita
+  o UPN inteiro); fora disso, a mensagem é a mesma de senha errada, sem consultar o AD —
+  nada que mude o DN do bind chega ao LDAP. Em produção, `ldaps://` (porta 636), com o
+  certificado sempre verificado; se a CA for interna, ela é confiada por
+  `NODE_EXTRA_CA_CERTS`. Com `ldap://` para outro servidor, o backend avisa na subida que as
+  senhas trafegam sem criptografia.
 - **Limite de tentativas de login:** no máximo 5 por IP em 15 minutos; a sexta recebe 429,
   com o tempo de espera, sem chegar ao AD. Protege contra força bruta e contra o bloqueio
   das contas no AD. Não contam o login com sucesso nem o AD fora do ar, que responde 503
@@ -200,6 +211,12 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
   `REBOOT=ReallySuppress` é sempre o último argumento, na instalação e na desinstalação. O catálogo recusa `REBOOT` com
   outro valor. Isso foi encontrado na prática: na VM de teste, um `REBOOT=Force` vindo
   do catálogo reiniciou a máquina antes dessa proteção existir.
+- **Pasta temporária protegida.** Na estação, o instalador fica em `C:\ProgramData\RSD\<alvo>`,
+  criada pela sessão WinRM já com permissão só para SYSTEM e Administradores, sem herança
+  ([`backend/scripts/temp-dir-rules.ps1`](backend/scripts/temp-dir-rules.ps1)). Antes de usar, a
+  pasta-base é conferida (dono, herança, permissões, junção): se um usuário comum a tiver
+  pré-criado, nada é copiado nem executado. Usuário comum não consegue plantar arquivos (ex.:
+  uma DLL) ao lado do instalador, que roda como administrador.
 - **Hash conferido no destino.** O SHA-256 é calculado pelo servidor no envio do
   instalador e conferido na própria estação antes de executar. Se não bater, nada é
   executado e a cópia é apagada.
@@ -265,8 +282,8 @@ Preencha o `backend/.env`. Para o ambiente local, os valores são:
 
 | Variável | Valor em desenvolvimento |
 |---|---|
-| `DATABASE_URL` | `postgresql://postgres:<senha-do-rsd-db>@localhost:5432/remote_software_deployer?schema=public` |
-| `LDAP_URL` | `ldap://localhost:389` |
+| `DATABASE_URL` | `postgresql://postgres:<senha-do-rsd-db>@127.0.0.1:5432/remote_software_deployer?schema=public` |
+| `LDAP_URL` | `ldap://127.0.0.1:389` |
 | `LDAP_BIND_DN_TEMPLATE` | `uid={{username}},ou=people,dc=rsd,dc=local` |
 | `LDAP_SEARCH_BIND_DN` | `uid=svc-rsd-leitura,ou=services,dc=rsd,dc=local` |
 | `LDAP_SEARCH_BIND_PASSWORD` | senha fictícia definida em `docker/ldap/services.dev.ldif` |
@@ -274,9 +291,23 @@ Preencha o `backend/.env`. Para o ambiente local, os valores são:
 | `LDAP_COMPUTER_FILTER` | `(objectClass=device)` |
 | `LDAP_COMPUTER_OS_ATTRIBUTE` | `description` |
 | `INSTALLER_STORAGE_DIR` | uma pasta **fora do repositório e fora do OneDrive**, entre aspas simples. Exemplo: `'C:\rsd-data\installers'`. O sistema recusa as duas localizações. |
-| `JWT_SECRET` | um valor aleatório: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `JWT_SECRET` | obrigatório, no mínimo 32 caracteres (o backend não sobe sem ele). Gere com: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
 
-As demais variáveis já têm padrão e estão comentadas no próprio `.env.example`.
+**LDAP com TLS (AD real, produção):** use `LDAP_URL="ldaps://servidor:636"`. O certificado do
+AD é sempre verificado. Se ele for emitido pela CA interna da Prefeitura, exporte a CA em PEM e
+defina, no ambiente do processo do backend (não no `.env`: o Node só lê essa variável na
+partida), `NODE_EXTRA_CA_CERTS=C:\caminho\ca-interna.pem`. O nome no certificado precisa
+bater com o servidor do `LDAP_URL`. Com `ldap://` para um endereço que não seja
+`127.0.0.1`/`localhost`, o backend registra na subida: "as senhas trafegam sem criptografia;
+use ldaps://". O OpenLDAP local continua em `ldap://127.0.0.1:389`.
+
+Use `127.0.0.1`, e não `localhost`, no banco e no LDAP: no Windows, `localhost` pode ir primeiro
+para o IPv6 `::1`, onde outro programa (ex.: o `wslrelay` do WSL) aceita a conexão e não responde
+— o backend fica esperando e não sobe.
+
+As demais variáveis já têm padrão e estão comentadas no próprio `.env.example`. Entre elas,
+`DEPLOYMENT_MAX_MACHINES` (máximo de máquinas numa implantação, padrão 50, de 1 a 500): a
+tela da Nova Implantação lê o valor do backend, então basta mudar no `.env` e reiniciar.
 
 Depois, aplique as migrations, cadastre os usuários de teste e suba o backend:
 
@@ -285,14 +316,15 @@ npm run db:generate
 npm run db:deploy
 
 # Usuários de teste: o login vem do LDAP; o perfil, da tabela User do sistema.
+# O username vai SEMPRE em minúsculas (o login converte o que a pessoa digita).
 docker exec -i rsd-db psql -U postgres -d remote_software_deployer <<'SQL'
-INSERT INTO "User" (id, username, role)
-VALUES (gen_random_uuid(), 'testuser', 'ADMIN') ON CONFLICT (username) DO NOTHING;
+INSERT INTO "User" (id, username, "displayName", role)
+VALUES (gen_random_uuid(), 'testuser', '', 'ADMIN') ON CONFLICT (username) DO NOTHING;
 INSERT INTO "User" (id, username, "displayName", role)
 VALUES (gen_random_uuid(), 'viewer', 'Usuário Visualizador', 'VIEWER') ON CONFLICT (username) DO NOTHING;
 SQL
 
-npm run start:dev      # http://localhost:3000 (GET /health)
+npm run start:dev      # http://127.0.0.1:3000 (GET /health)
 ```
 
 ### 3. Frontend
@@ -359,8 +391,14 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
   Windows dentro da rede da Prefeitura.
 - **Banda:** cada máquina recebe uma cópia do instalador a partir do servidor. Por
   exemplo, 10 máquinas com um instalador de 300 MB somam 3 GB saindo do servidor.
-- **Sem estado online/offline das máquinas:** o AD não sabe se a estação está ligada. O
-  status só aparece quando a implantação tenta conectar.
+- **"Respondendo no WinRM" não é "online":** a verificação periódica (a cada 15 min, e pelo
+  botão "Verificar agora") só testa se a porta 5985 aceita conexão, sem autenticação e
+  sem comando. Uma máquina que responde pode ainda recusar a credencial ou estar ocupada,
+  e uma que não responde pode estar ligada com o firewall fechando a porta. Nomes que não
+  existem no DNS levam ~2,7 s cada para falhar no Windows; para não travar o DNS do resto
+  do backend, a verificação faz no máximo 2 consultas de DNS ao mesmo tempo, o que deixa a
+  rodada mais lenta quando há muitos nomes antigos no AD. Sem WinRM no servidor (modo
+  demonstração), a verificação fica desligada.
 - **EXE sem verificação de "já instalado":** só o MSI traz um código de produto
   confiável. Um EXE implantado de novo é executado de novo.
 - **Desinstalação só para MSI, e por versão:** cada ProductCode corresponde a uma
@@ -404,9 +442,8 @@ Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
 - **Desinstalação de EXE:** exigiria descobrir, por família de instalador (Inno Setup,
   NSIS, InstallShield…), o desinstalador e os argumentos silenciosos de cada produto.
 - **Agente nas estações:** eliminaria a cópia pelo servidor, que limita a banda, e
-  permitiria saber se a máquina está online.
-- **Status online/offline e dados de hardware** (IP, CPU, memória) por verificação sob
-  demanda.
+  permitiria saber se a máquina está ligada (não só se a porta do WinRM responde).
+- **Dados de hardware** (IP, CPU, memória) por verificação sob demanda.
 - **Implantação em ambiente demonstrável** para a banca: nuvem com o AD fictício e a
   implantação ao vivo pelo notebook com a VM.
 - **Sessão em cookie `httpOnly`** em vez de `sessionStorage`.
