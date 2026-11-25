@@ -6,6 +6,7 @@ import { Roles } from '../auth/roles.decorator';
 import { MachineListResponse, MachinesService } from './machines.service';
 import { SyncResult } from './machine-sync.service';
 import { MachineSyncScheduler, SyncStatus } from './machine-sync.scheduler';
+import { MachineReachabilityScheduler, ReachabilityStatus } from './machine-reachability.scheduler';
 
 @Controller('machines')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -13,6 +14,7 @@ export class MachinesController {
   constructor(
     private readonly machinesService: MachinesService,
     private readonly machineSyncScheduler: MachineSyncScheduler,
+    private readonly reachability: MachineReachabilityScheduler,
   ) {}
 
   @Get()
@@ -33,5 +35,23 @@ export class MachinesController {
   @Get('sync/status')
   syncStatus(): SyncStatus {
     return this.machineSyncScheduler.getStatus();
+  }
+
+  /**
+   * "Verificar agora": testa a porta do WinRM (5985) das máquinas presentes no AD, em
+   * segundo plano — responde 202 na hora; o andamento vem de GET reachability/status.
+   * 409 com uma verificação em andamento; 503 sem WinRM (modo demonstração).
+   */
+  @Post('reachability/check')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Roles(UserRole.ADMIN, UserRole.OPERATOR)
+  checkReachability(): ReachabilityStatus {
+    return this.reachability.start('MANUAL');
+  }
+
+  /** Andamento e resultado da verificação do WinRM — qualquer usuário logado. */
+  @Get('reachability/status')
+  reachabilityStatus(): ReachabilityStatus {
+    return this.reachability.getStatus();
   }
 }

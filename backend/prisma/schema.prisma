@@ -13,6 +13,11 @@ enum UserRole {
   VIEWER
 }
 
+/// Resultado da verificação periódica da porta do WinRM (5985), só teste de conexão TCP:
+/// nenhuma autenticação, nenhum comando. ONLINE = "respondendo no WinRM" (a porta aceitou
+/// conexão), e NÃO "ligada" ou "pronta para implantar"; OFFLINE = "sem resposta" (recusou,
+/// tempo esgotado ou nome não encontrado no DNS); UNKNOWN = ainda não verificada. Os
+/// nomes dos valores ficaram os originais; a tela mostra os textos honestos.
 enum MachineStatus {
   ONLINE
   OFFLINE
@@ -68,6 +73,8 @@ model Machine {
   operatingSystem String?
   department      String?
   status          MachineStatus @default(UNKNOWN)
+  /// Quando a porta do WinRM foi verificada pela última vez (null = nunca).
+  statusCheckedAt DateTime?
   lastSync        DateTime?
 
   targets   DeploymentTarget[]

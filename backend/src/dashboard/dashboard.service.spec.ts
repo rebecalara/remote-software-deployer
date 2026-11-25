@@ -47,8 +47,8 @@ describe('DashboardService.overview', () => {
     expect(prisma.machine.count).toHaveBeenCalledWith({ where: { lastSync: SYNC } });
     expect(view.deployments).toMatchObject({ activeDeployments: 1, pendingTargets: 3, failureRate: 0.1 });
     expect(view.system).toEqual({
-      database: { ok: true, detail: null },
-      ldap: { ok: true, detail: null },
+      database: { ok: true, detail: null, reason: null },
+      ldap: { ok: true, detail: null, reason: null },
       deployment: { available: true, detail: null },
       lastSyncAt: SYNC.toISOString(),
       checkedAt: '2026-11-14T12:00:00.000Z',
@@ -81,13 +81,22 @@ describe('DashboardService.overview', () => {
     expect((await down.service.overview()).system.ldap).toEqual({
       ok: false,
       detail: 'O AD/LDAP não respondeu: connect ECONNREFUSED 127.0.0.1:389',
+      reason: 'no-response',
     });
 
+    // Recusou a conta: a tela mostra "Recusou a conta de serviço" (o AD respondeu).
     const refused = setup();
     refused.ldap.checkServiceAccount.mockRejectedValue(new LdapAuthenticationError('Invalid Credentials'));
-    expect((await refused.service.overview()).system.ldap.detail).toBe(
-      'O AD/LDAP respondeu, mas recusou a conta de serviço de leitura.',
-    );
+    expect((await refused.service.overview()).system.ldap).toEqual({
+      ok: false,
+      detail: 'O AD/LDAP respondeu, mas recusou a conta de serviço de leitura.',
+      reason: 'refused',
+    });
+
+    // Conta de serviço não configurada (erro comum, não do LDAP): continua "sem resposta".
+    const missing = setup();
+    missing.ldap.checkServiceAccount.mockRejectedValue(new Error('LDAP_SEARCH_BIND_DN não configurado no ambiente.'));
+    expect((await missing.service.overview()).system.ldap.reason).toBe('no-response');
   });
 
   it('o bind no LDAP é cacheado: duas visitas seguidas fazem um bind só', async () => {
@@ -102,7 +111,7 @@ describe('DashboardService.overview', () => {
   it('banco sem responder aparece como não ok', async () => {
     const { prisma, service } = setup();
     prisma.$queryRaw.mockRejectedValue(new Error('Connection refused'));
-    expect((await service.overview()).system.database).toEqual({ ok: false, detail: 'Connection refused' });
+    expect((await service.overview()).system.database).toEqual({ ok: false, detail: 'Connection refused', reason: 'no-response' });
   });
 
   it('atividade: implantações encerradas e softwares cadastrados, mais recentes primeiro', async () => {

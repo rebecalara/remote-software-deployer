@@ -35,10 +35,26 @@ export interface SystemCheck {
   ok: boolean;
   /** Motivo, quando não está ok. */
   detail: string | null;
+  /**
+   * Qual falha, para o texto da tela: 'refused' = o serviço respondeu e recusou a conta
+   * (só no AD/LDAP); 'no-response' = não respondeu ou outro erro. null quando ok.
+   */
+  reason: 'refused' | 'no-response' | null;
 }
 
 export interface DashboardView {
   machines: { total: number; seenInLastSync: number; lastSyncAt: string | null };
+  /**
+   * Máquinas presentes no AD que responderam na porta do WinRM na última verificação.
+   * available false = verificação desligada neste servidor (sem WinRM), com o motivo.
+   */
+  reachability: {
+    available: boolean;
+    detail: string | null;
+    responding: number;
+    total: number;
+    checkedAt: string | null;
+  };
   deployments: DeploymentOverview & {
     /** Falhas / (concluídas + falhas) na janela; null sem nenhuma encerrada. */
     failureRate: number | null;
@@ -74,8 +90,10 @@ export class DashboardService {
       this.checkLdap(now.getTime()),
     ]);
     const { succeeded, failed } = summary.finishedInWindow;
+    const reachability = await this.reachabilityCounts(machines.lastSyncAt, machines.seenInLastSync);
     return {
       machines,
+      reachability,
       deployments: { ...summary, failureRate: succeeded + failed > 0 ? failed / (succeeded + failed) : null },
       activity,
       system: {
@@ -91,9 +109,9 @@ export class DashboardService {
   private async checkDatabase(): Promise<SystemCheck> {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      return { ok: true, detail: null };
+      return { ok: true, detail: null, reason: null };
     } catch (err) {
-      return { ok: false, detail: (err as Error).message };
+      return { ok: false, detail: (err as Error).message, reason: 'no-response' };
     }
   }
 
@@ -103,14 +121,15 @@ export class DashboardService {
     let result: SystemCheck;
     try {
       await this.ldap.checkServiceAccount();
-      result = { ok: true, detail: null };
+      result = { ok: true, detail: null, reason: null };
     } catch (err) {
+      const refused = err instanceof LdapAuthenticationError;
       result = {
         ok: false,
-        detail:
-          err instanceof LdapAuthenticationError
-            ? 'O AD/LDAP respondeu, mas recusou a conta de serviço de leitura.'
-            : `O AD/LDAP não respondeu${(err as Error).message ? `: ${(err as Error).message}` : ' (conexão recusada ou tempo esgotado).'}`,
+        detail: refused
+          ? 'O AD/LDAP respondeu, mas recusou a conta de serviço de leitura.'
+          : `O AD/LDAP não respondeu${(err as Error).message ? `: ${(err as Error).message}` : ' (conexão recusada ou tempo esgotado).'}`,
+        reason: refused ? 'refused' : 'no-response',
       };
       this.logger.warn(`Status do sistema: ${result.detail}`);
     }
@@ -127,6 +146,19 @@ export class DashboardService {
     // Mesma regra de "presente no AD" da tela de Máquinas (isSeenInLastSync).
     const seenInLastSync = lastSyncAt ? await this.prisma.machine.count({ where: { lastSync: lastSyncAt } }) : 0;
     return { total, seenInLastSync, lastSyncAt: lastSyncAt?.toISOString() ?? null };
+  }
+
+  /** "N de M respondendo no WinRM", só entre as máquinas presentes no AD. */
+  private async reachabilityCounts(lastSyncAt: string | null, present: number): Promise<DashboardView['reachability']> {
+    const available = this.executor.isAvailable;
+    const base = { available, detail: available ? null : this.executor.unavailableReason, total: present };
+    if (!available || !lastSyncAt) return { ...base, responding: 0, checkedAt: null };
+    const where = { lastSync: new Date(lastSyncAt) };
+    const [responding, aggregate] = await Promise.all([
+      this.prisma.machine.count({ where: { ...where, status: 'ONLINE', statusCheckedAt: { not: null } } }),
+      this.prisma.machine.aggregate({ where, _max: { statusCheckedAt: true } }),
+    ]);
+    return { ...base, responding, checkedAt: aggregate._max.statusCheckedAt?.toISOString() ?? null };
   }
 
   /** Implantações encerradas e softwares cadastrados, os mais recentes primeiro. */

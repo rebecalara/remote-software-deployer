@@ -8,7 +8,10 @@ export interface MachineView {
   ipAddress: string | null;
   operatingSystem: string | null;
   department: string | null;
+  /** Resultado da verificação da porta do WinRM: ONLINE = "respondendo no WinRM". */
   status: MachineStatus;
+  /** Quando a porta do WinRM foi verificada pela última vez (null = nunca). */
+  statusCheckedAt: string | null;
   lastSync: string | null;
   /** false = a máquina não apareceu na sincronização mais recente (saiu do AD). */
   seenInLastSync: boolean;
@@ -67,6 +70,7 @@ export class MachinesService {
         operatingSystem: m.operatingSystem,
         department: m.department,
         status: m.status,
+        statusCheckedAt: m.statusCheckedAt?.toISOString() ?? null,
         lastSync: m.lastSync?.toISOString() ?? null,
         seenInLastSync: isSeenInLastSync(m.lastSync, lastSyncAt),
       })),
