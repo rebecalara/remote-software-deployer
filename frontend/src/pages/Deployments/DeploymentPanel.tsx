@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { FeedbackMessage, type Feedback } from '../../components/FeedbackMessage';
+import { Tooltip } from '../../components/Tooltip';
 import { RefreshIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
 import { SessionExpiredError } from '../../services/apiClient';
 import { cancelDeployment, getDeployment, getTargetLogs } from '../../services/deploymentService';
 import type { Deployment, DeploymentLog, DeploymentStatus, DeploymentTarget, LogLevel } from '../../types/deployment';
-import { LiveIndicator, StatusBadge, formatDuration, formatTime } from './deploymentUi';
+import { formatDuration, formatTime } from './deploymentUi';
 import { phaseOf, type PhaseTone } from './targetPhase';
 import { plural } from './wizardParts';
 
 // Detalhe de UMA implantação (RF06/RF13), aberto na própria linha do Monitoramento e
-// do Histórico (acordeão): máquinas com fase, status, tempo, código de saída e o log de
-// cada uma, e "Cancelar pendentes". Polling simples (PLANNING §9, sem WebSocket): a cada
-// 3 s enquanto houver máquina pendente ou em execução.
+// do Histórico (acordeão): máquinas com status (a fase durante a execução, o resultado no
+// fim), tempo, código de saída e o log de cada uma, e "Cancelar pendentes". Polling simples
+// (PLANNING §9, sem WebSocket): a cada 3 s enquanto houver máquina pendente ou em execução.
+// O selo "Atualizando a cada 3 s" fica só no topo da tela, não se repete aqui.
 const POLL_MS = 3_000;
 
 type Filter = 'all' | 'active' | 'succeeded' | 'failed' | 'cancelled';
@@ -51,7 +54,7 @@ export function DeploymentPanel({
   }, [deploymentId, filter, expanded]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
@@ -100,6 +103,11 @@ export function DeploymentPanel({
     }
   }
 
+  // A aba "Em andamento" some quando a implantação encerra; quem estava nela volta a "Todas".
+  useEffect(() => {
+    if (finished && filter === 'active') setFilter('all');
+  }, [finished, filter]);
+
   const targets = useMemo(() => deployment?.targets ?? [], [deployment]);
   const visible = useMemo(
     () =>
@@ -115,7 +123,7 @@ export function DeploymentPanel({
 
   if (!deployment) {
     return (
-      <p className="px-2 py-4 text-sm text-slate-500">
+      <p className="px-2 py-4 text-body text-slate-500">
         {loadError ? `Não foi possível carregar a implantação: ${loadError}` : 'Carregando máquinas…'}
       </p>
     );
@@ -127,48 +135,58 @@ export function DeploymentPanel({
   return (
     <div className="space-y-3" data-testid="deployment-panel">
       {deployment.vendorCommand && (
-        <p className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900" data-testid="vendor-command">
+        <p className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-meta text-orange-900" data-testid="vendor-command">
           Comando do fabricante executado: <span className="font-mono break-all">{deployment.vendorCommand}</span>
         </p>
       )}
-      {/* Abas por status + cancelar + indicador de atualização */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="tablist" aria-label="Filtrar máquinas" className="flex flex-wrap gap-1 border-b border-slate-200">
-          <Tab active={filter === 'all'} onClick={() => setFilter('all')}>Todas ({c.total})</Tab>
-          <Tab active={filter === 'active'} onClick={() => setFilter('active')}>Em andamento ({active})</Tab>
-          <Tab active={filter === 'succeeded'} onClick={() => setFilter('succeeded')}>Concluídas ({c.succeeded})</Tab>
-          <Tab active={filter === 'failed'} onClick={() => setFilter('failed')}>Com falha ({c.failed})</Tab>
-          {c.cancelled > 0 && (
-            <Tab active={filter === 'cancelled'} onClick={() => setFilter('cancelled')}>Canceladas ({c.cancelled})</Tab>
+      {/* Abas por status (só com mais de 1 máquina) + cancelar + atualizar (só em andamento) */}
+      {(c.total > 1 || (canCancel && c.pending > 0 && !confirmCancel) || !finished) && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {c.total > 1 ? (
+            <div role="tablist" aria-label="Filtrar máquinas" className="flex flex-wrap gap-1 border-b border-slate-200">
+              <Tab active={filter === 'all'} onClick={() => setFilter('all')}>Todas ({c.total})</Tab>
+              {!finished && (
+                <Tab active={filter === 'active'} onClick={() => setFilter('active')}>Em andamento ({active})</Tab>
+              )}
+              <Tab active={filter === 'succeeded'} onClick={() => setFilter('succeeded')}>Concluídas ({c.succeeded})</Tab>
+              <Tab active={filter === 'failed'} onClick={() => setFilter('failed')}>Com falha ({c.failed})</Tab>
+              {c.cancelled > 0 && (
+                <Tab active={filter === 'cancelled'} onClick={() => setFilter('cancelled')}>Canceladas ({c.cancelled})</Tab>
+              )}
+            </div>
+          ) : (
+            <span />
           )}
+          <div className="flex flex-wrap items-center gap-2 text-meta">
+            {canCancel && c.pending > 0 && !confirmCancel && (
+              <button
+                type="button"
+                onClick={() => setConfirmCancel(true)}
+                className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-body font-medium text-red-700 hover:bg-red-50"
+              >
+                Cancelar pendentes ({c.pending})
+              </button>
+            )}
+            {!finished && (
+              <Tooltip content="Atualizar esta implantação agora" asLabel align="end">
+                <button
+                  type="button"
+                  onClick={load}
+                  className="rounded-md p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-700"
+                >
+                  <RefreshIcon className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {canCancel && c.pending > 0 && !confirmCancel && (
-            <button
-              type="button"
-              onClick={() => setConfirmCancel(true)}
-              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
-            >
-              Cancelar pendentes ({c.pending})
-            </button>
-          )}
-          <LiveIndicator live={!finished} idleText="Implantação encerrada" />
-          <button
-            type="button"
-            onClick={load}
-            aria-label="Atualizar esta implantação"
-            className="rounded-md p-1.5 text-slate-500 hover:bg-slate-200/60 hover:text-slate-700"
-          >
-            <RefreshIcon className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
+      )}
 
       {confirmCancel && (
         <div
           role="alertdialog"
           aria-label="Confirmar cancelamento"
-          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-body text-amber-900"
         >
           <span className="min-w-0 flex-1">
             {c.pending === 1
@@ -195,18 +213,9 @@ export function DeploymentPanel({
         </div>
       )}
 
-      {feedback && (
-        <p
-          role={feedback.kind === 'error' ? 'alert' : 'status'}
-          className={`rounded-lg px-3 py-2 text-sm ${
-            feedback.kind === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'
-          }`}
-        >
-          {feedback.text}
-        </p>
-      )}
+      {feedback && <FeedbackMessage feedback={feedback} onDismiss={() => setFeedback(null)} />}
       {loadError && (
-        <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-body text-amber-800">
           Falha ao atualizar ({loadError}). Tentando de novo a cada 3 s.
         </p>
       )}
@@ -214,15 +223,14 @@ export function DeploymentPanel({
       {/* Máquinas */}
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
         {visible.length === 0 ? (
-          <p className="px-6 py-8 text-center text-sm text-slate-500">Nenhuma máquina neste filtro.</p>
+          <p className="px-6 py-8 text-center text-body text-slate-500">Nenhuma máquina neste filtro.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
+            <table className="w-full min-w-[760px] text-left text-body">
+              <thead className="border-b border-slate-200 bg-slate-50 text-meta font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
                 <tr>
                   <th scope="col" className="w-10 px-3 py-2.5" aria-label="Expandir log" />
                   <th scope="col" className="px-4 py-2.5">Máquina</th>
-                  <th scope="col" className="px-4 py-2.5">Fase</th>
                   <th scope="col" className="px-4 py-2.5">Status</th>
                   <th scope="col" className="px-4 py-2.5">Início</th>
                   <th scope="col" className="px-4 py-2.5">Tempo decorrido</th>
@@ -251,14 +259,29 @@ export function DeploymentPanel({
 
 // ---------- linha da máquina + log ----------
 
-const PHASE_COLOR: Record<PhaseTone, string> = {
-  waiting: 'text-slate-500',
-  running: 'text-blue-700',
-  success: 'text-emerald-700',
-  warning: 'text-amber-700',
-  danger: 'text-red-700',
-  muted: 'text-slate-500',
+// Status da máquina numa coluna só: durante a execução, a fase ("Copiando o instalador");
+// no fim, o resultado ("Concluído", "Já estava instalado", "Falhou"…).
+const PHASE_STYLE: Record<PhaseTone, { className: string; dot: string }> = {
+  waiting: { className: 'border-slate-200 bg-slate-50 text-slate-600', dot: 'bg-slate-400' },
+  running: { className: 'border-blue-200 bg-blue-50 text-blue-700', dot: 'bg-blue-500 animate-pulse motion-reduce:animate-none' },
+  success: { className: 'border-emerald-200 bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  warning: { className: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
+  danger: { className: 'border-red-200 bg-red-50 text-red-700', dot: 'bg-red-500' },
+  muted: { className: 'border-slate-200 bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
 };
+
+function PhaseBadge({ label, tone }: { label: string; tone: PhaseTone }) {
+  const st = PHASE_STYLE[tone];
+  return (
+    <span
+      data-testid="phase"
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-meta font-medium whitespace-nowrap ${st.className}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
 
 function TargetRow({
   deploymentId,
@@ -296,23 +319,20 @@ function TargetRow({
             </span>
           </button>
         </td>
-        <td className="px-4 py-2.5 font-mono text-[13px] font-semibold whitespace-nowrap text-slate-900">{t.hostname}</td>
-        <td className={`px-4 py-2.5 font-medium whitespace-nowrap ${PHASE_COLOR[phase.tone]}`} data-testid="phase">
-          {phase.label}
-        </td>
+        <td className="px-4 py-2.5 font-mono text-body font-semibold whitespace-nowrap text-slate-900">{t.hostname}</td>
         <td className="px-4 py-2.5">
-          <StatusBadge status={t.status} />
+          <PhaseBadge label={phase.label} tone={phase.tone} />
         </td>
-        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">{formatTime(t.startedAt)}</td>
-        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">
+        <td className="px-4 py-2.5 text-body whitespace-nowrap text-slate-600">{formatTime(t.startedAt)}</td>
+        <td className="px-4 py-2.5 text-body whitespace-nowrap text-slate-600 tabular-nums">
           {start !== null && end !== null ? formatDuration(end - start) : '—'}
         </td>
-        <td className="px-4 py-2.5 font-mono text-[13px] whitespace-nowrap text-slate-600">{t.exitCode ?? '—'}</td>
+        <td className="px-4 py-2.5 font-mono text-body whitespace-nowrap text-slate-600">{t.exitCode ?? '—'}</td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={7} className="bg-slate-50 px-4 pt-1 pb-4">
-            <LogPanel deploymentId={deploymentId} target={t} phaseLabel={phase.label} />
+          <td colSpan={6} className="bg-slate-50 px-4 pt-2 pb-4">
+            <LogPanel deploymentId={deploymentId} target={t} />
           </td>
         </tr>
       )}
@@ -328,7 +348,7 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
 };
 
 /** Passos reais da máquina (DeploymentLog), atualizados enquanto ela não termina. */
-function LogPanel({ deploymentId, target, phaseLabel }: { deploymentId: string; target: DeploymentTarget; phaseLabel: string }) {
+function LogPanel({ deploymentId, target }: { deploymentId: string; target: DeploymentTarget }) {
   const [logs, setLogs] = useState<DeploymentLog[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -362,18 +382,16 @@ function LogPanel({ deploymentId, target, phaseLabel }: { deploymentId: string; 
 
   return (
     <div>
-      <p className="mb-2 text-xs font-medium text-slate-600">
-        Log — <span className="font-mono">{target.hostname}</span>
-        <span className="text-slate-400"> — {phaseLabel}</span>
-      </p>
       <div
         ref={box}
+        role="log"
+        aria-label={`Log de ${target.hostname}`}
         data-testid="log-panel"
         onScroll={(e) => {
           const el = e.currentTarget;
           atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
-        className="max-h-72 overflow-y-auto rounded-lg bg-slate-950 px-4 py-3 font-mono text-[12.5px] leading-relaxed"
+        className="max-h-72 overflow-y-auto rounded-lg bg-slate-950 px-4 py-3 font-mono text-meta leading-relaxed"
       >
         {error ? (
           <p className="text-red-400">Não foi possível carregar o log: {error}</p>
@@ -400,7 +418,7 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap ${
+      className={`-mb-px border-b-2 px-3 py-2 text-body font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
         active ? 'border-blue-700 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'
       }`}
     >

@@ -33,16 +33,16 @@ export function DeploymentRedirect() {
     };
   }, [id, navigate]);
 
-  if (!error) return <p className="p-6 text-sm text-slate-500">Abrindo a implantação…</p>;
+  if (!error) return <p className="p-6 text-body text-slate-500">Abrindo a implantação…</p>;
 
   return (
     <div className="p-4 sm:p-6">
       <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-        <p className="text-sm font-medium text-slate-700">
+        <p className="text-body font-medium text-slate-700">
           {error.notFound ? 'Implantação não encontrada.' : 'Não foi possível abrir a implantação.'}
         </p>
-        {!error.notFound && <p className="mt-1 text-sm text-slate-500">{error.message}</p>}
-        <div className="mt-4 flex justify-center gap-4 text-sm font-medium">
+        {!error.notFound && <p className="mt-1 text-body text-slate-500">{error.message}</p>}
+        <div className="mt-4 flex justify-center gap-4 text-body font-medium">
           <Link to="/monitoring" className="text-blue-700 hover:underline">
             Monitoramento
           </Link>

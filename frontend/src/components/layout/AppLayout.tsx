@@ -40,7 +40,7 @@ export function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100">
       {/* Menu fixo (≥ 1024px) */}
-      <aside className={`hidden shrink-0 transition-[width] duration-200 lg:block ${collapsed ? 'w-[72px]' : 'w-64'}`}>
+      <aside className={`hidden shrink-0 transition-[width] duration-200 lg:block ${collapsed ? 'w-[72px]' : 'w-60'}`}>
         <Sidebar collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} onLogout={logout} />
       </aside>
 
@@ -48,7 +48,7 @@ export function AppLayout() {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
           <div className="absolute inset-0 bg-slate-950/50" onClick={() => setMobileOpen(false)} />
-          <aside className="relative h-full w-64 shadow-xl">
+          <aside className="relative h-full w-60 shadow-xl">
             <Sidebar
               collapsed={false}
               onToggleCollapsed={() => undefined}
@@ -70,15 +70,15 @@ export function AppLayout() {
             <MenuIcon className="h-5 w-5" />
           </button>
 
-          <h1 className="truncate text-lg font-semibold text-slate-900">{title}</h1>
+          <h1 className="truncate text-page font-semibold text-slate-900">{title}</h1>
 
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden text-right leading-tight sm:block">
-              <p className="text-sm font-semibold text-slate-900">{user?.displayName || user?.username}</p>
-              <p className="text-xs text-slate-500">{user ? roleLabel(user.role) : ''}</p>
+              <p className="text-body font-semibold text-slate-900">{user?.displayName || user?.username}</p>
+              <p className="text-meta text-slate-500">{user ? roleLabel(user.role) : ''}</p>
             </div>
             <div
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-body font-semibold text-white"
               aria-hidden="true"
             >
               {initials(user?.displayName, user?.username)}

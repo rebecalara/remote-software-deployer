@@ -89,6 +89,36 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 }
 
 /**
+ * Download autenticado (ex.: CSV do Histórico): devolve o arquivo e o nome que o backend
+ * mandou no Content-Disposition. Mesmas regras do apiFetch: 401 encerra a sessão; erro da
+ * API chega com a mensagem do backend; falha de rede vira NetworkError.
+ */
+export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string | null }> {
+  const token = getToken();
+  if (!token) {
+    expireSession();
+    throw new SessionExpiredError();
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  } catch {
+    throw new NetworkError();
+  }
+  if (response.status === 401) {
+    expireSession();
+    throw new SessionExpiredError();
+  }
+  if (!response.ok) {
+    const { message, field } = parseErrorBody(await response.text().catch(() => ''), response.status);
+    throw new ApiError(response.status, message, field);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const fileName = /filename="([^"]+)"/.exec(disposition)?.[1] ?? null;
+  return { blob: await response.blob(), fileName };
+}
+
+/**
  * Lê o corpo de erro do NestJS ({ statusCode, message, error, field? }) — usado pelo
  * apiFetch e pelo apiUpload. `message` pode ser string ou lista; `field` vem nos 400
  * de validação do catálogo (ex.: "installArgs[2]").

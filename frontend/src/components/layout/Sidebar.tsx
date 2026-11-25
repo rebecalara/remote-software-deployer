@@ -1,7 +1,9 @@
-import { NavLink } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { LogOutIcon, MenuIcon, XIcon } from '../icons';
 import { NAV_ITEMS } from './navItems';
+import { RsdMark } from '../brand/RsdMark';
+import { RsdWordmark } from '../brand/RsdWordmark';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -16,7 +18,7 @@ function SectionTitle({ collapsed, className = '', children }: { collapsed: bool
   // Recolhido: só um divisor, para manter a separação entre os grupos.
   if (collapsed) return <div className={`mx-2 mb-2 border-t border-white/5 ${className}`} aria-hidden="true" />;
   return (
-    <p className={`mb-2 px-3 text-[11px] font-semibold tracking-wider text-slate-500 uppercase ${className}`}>{children}</p>
+    <p className={`mb-2 px-3 text-meta font-semibold tracking-wider text-slate-500 uppercase ${className}`}>{children}</p>
   );
 }
 
@@ -28,29 +30,28 @@ export function Sidebar({ collapsed, onToggleCollapsed, onCloseMobile, onLogout 
     (item) => item.available && (!item.roles || (user !== null && item.roles.includes(user.role))),
   );
   const itemBase =
-    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors';
+    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-body font-medium transition-colors';
 
   return (
     <div className="flex h-full flex-col bg-slate-950 text-slate-300">
-      {/* Identidade + botão de recolher (☰). Recolhido, os 72px não comportam logo e
-          botão lado a lado: fica só o ☰, que é o que permite expandir de volta. */}
-      <div className={`flex items-center gap-3 border-b border-white/5 py-5 ${collapsed ? 'justify-center px-2' : 'px-5'}`}>
-        {!collapsed && (
-          <>
-            {/* Fundo branco: a logo é azul-marinho com fundo transparente e sumiria no slate-950 */}
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white p-0.5">
-              <img
-                src="/Logotipo_Prefeitura.png"
-                alt="Prefeitura Municipal de Joinville"
-                className="h-full w-full object-contain"
-              />
-            </div>
-            <div className="min-w-0 leading-tight">
-              <p className="truncate text-sm font-semibold text-white">Remote Software</p>
-              <p className="truncate text-xs text-slate-400">Deployer</p>
-            </div>
-          </>
-        )}
+      {/* Logo (link para o Dashboard; anima ao passar o mouse) + botão de recolher (☰).
+          Aberto: logo alinhada à esquerda com os ícones do menu (24 px), ☰ à direita.
+          Recolhido (72 px): só o símbolo, com o ☰ embaixo. */}
+      <div
+        className={`flex border-b border-white/5 py-5 ${
+          collapsed ? 'flex-col items-center gap-3 px-2' : 'items-center gap-3 pr-4 pl-6'
+        }`}
+      >
+        <Link
+          to="/dashboard"
+          onClick={onCloseMobile}
+          aria-label="Remote Software Deployer — ir para o Dashboard"
+          title="Ir para o Dashboard"
+          className="group flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <RsdMark tone="dark" animateOnHover className="h-8 w-8 shrink-0" />
+          {!collapsed && <RsdWordmark tone="dark" className="text-page" />}
+        </Link>
         {!onCloseMobile && (
           <button
             type="button"

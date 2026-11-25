@@ -1,80 +1,54 @@
-import type { ReactNode } from 'react';
-import type { DeploymentAction, DeploymentCounts, DeploymentStatus, DeploymentSummary } from '../../types/deployment';
+import { Tooltip } from '../../components/Tooltip';
+import type { DeploymentAction, DeploymentCounts, DeploymentDisplayStatus, DeploymentSummary } from '../../types/deployment';
 
 // Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
 // pelo Histórico.
 
-const STATUS_STYLE: Record<DeploymentStatus, { label: string; className: string; dot: string }> = {
+const STATUS_STYLE: Record<DeploymentDisplayStatus, { label: string; className: string; dot: string }> = {
   PENDING: { label: 'Aguardando', className: 'border-slate-200 bg-slate-50 text-slate-600', dot: 'bg-slate-400' },
   RUNNING: { label: 'Em andamento', className: 'border-blue-200 bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
   SUCCEEDED: { label: 'Concluído', className: 'border-emerald-200 bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  // Parcial: alguma máquina concluiu e alguma falhou (calculado no backend). Falhou: nenhuma concluiu.
+  PARTIAL: { label: 'Parcial', className: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
   FAILED: { label: 'Falhou', className: 'border-red-200 bg-red-50 text-red-700', dot: 'bg-red-500' },
   CANCELLED: { label: 'Cancelado', className: 'border-slate-200 bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
 };
 
-export const STATUS_LABEL: Record<DeploymentStatus, string> = Object.fromEntries(
+export const STATUS_LABEL: Record<DeploymentDisplayStatus, string> = Object.fromEntries(
   Object.entries(STATUS_STYLE).map(([k, v]) => [k, v.label]),
-) as Record<DeploymentStatus, string>;
+) as Record<DeploymentDisplayStatus, string>;
 
-export function StatusBadge({ status }: { status: DeploymentStatus }) {
+/**
+ * Selo do status da implantação. "Parcial" traz a dica "N de M máquinas concluídas; veja as
+ * falhas" (precisa de `counts`).
+ */
+export function StatusBadge({ status, counts }: { status: DeploymentDisplayStatus; counts?: Pick<DeploymentCounts, 'succeeded' | 'total'> }) {
   const s = STATUS_STYLE[status];
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${s.className}`}>
+  const badge = (
+    <span
+      data-status={status}
+      tabIndex={status === 'PARTIAL' && counts ? 0 : undefined}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-meta font-medium whitespace-nowrap ${s.className}`}
+    >
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} aria-hidden="true" />
       {s.label}
     </span>
   );
+  if (status !== 'PARTIAL' || !counts) return badge;
+  return <Tooltip content={partialHint(counts)}>{badge}</Tooltip>;
 }
 
-type CounterTone = 'slate' | 'blue' | 'green' | 'red';
+/** "1 de 3 máquinas concluídas; veja as falhas" */
+export function partialHint(c: Pick<DeploymentCounts, 'succeeded' | 'total'>): string {
+  return `${c.succeeded} de ${c.total} ${c.total === 1 ? 'máquina concluída' : 'máquinas concluídas'}; veja as falhas`;
+}
 
-/** Fundo suave e cor do ícone de cada tom (Dashboard). */
-const COUNTER_ICON_STYLE: Record<CounterTone, string> = {
-  slate: 'bg-slate-100 text-slate-600',
-  blue: 'bg-blue-50 text-blue-600',
-  green: 'bg-emerald-50 text-emerald-600',
-  red: 'bg-red-50 text-red-600',
-};
-
-export function Counter({
-  label,
-  value,
-  tone = 'slate',
-  detail,
-  icon,
-}: {
-  label: string;
-  value: number;
-  tone?: CounterTone;
-  detail?: string;
-  /** Ícone num quadrado com fundo suave da cor do tom (usado no Dashboard). */
-  icon?: ReactNode;
-}) {
-  const color = { slate: 'text-slate-900', blue: 'text-blue-700', green: 'text-emerald-700', red: 'text-red-700' }[tone];
+/**
+ * "Atualizando a cada 3 s": só aparece enquanto há algo em andamento (e o polling está ligado).
+ * Sem nada rodando, não aparece — a lista vazia já diz isso.
+ */
+export function LiveIndicator() {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <div className="min-w-0">
-        <p className={`text-2xl font-bold tabular-nums ${color}`}>{value}</p>
-        <p className="text-xs font-medium text-slate-500">
-          {label}
-          {detail && <span className="text-slate-400"> · {detail}</span>}
-        </p>
-      </div>
-      {icon && (
-        <span
-          data-testid="counter-icon"
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${COUNTER_ICON_STYLE[tone]}`}
-        >
-          {icon}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Indicador do polling: "Atualizando a cada 3 s" enquanto há algo em andamento. */
-export function LiveIndicator({ live, idleText }: { live: boolean; idleText: string }) {
-  return live ? (
     <span
       data-testid="live-indicator"
       className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-700"
@@ -82,19 +56,7 @@ export function LiveIndicator({ live, idleText }: { live: boolean; idleText: str
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" />
       Atualizando a cada 3 s
     </span>
-  ) : (
-    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600">{idleText}</span>
   );
-}
-
-/** "2 de 3 concluídas · 1 com falha · 1 na fila" — resumo das máquinas de uma implantação. */
-export function countsText(c: DeploymentCounts): string {
-  const parts = [`${c.succeeded} de ${c.total} ${c.total === 1 ? 'concluída' : 'concluídas'}`];
-  if (c.running > 0) parts.push(`${c.running} em andamento`);
-  if (c.pending > 0) parts.push(`${c.pending} na fila`);
-  if (c.failed > 0) parts.push(`${c.failed} com falha`);
-  if (c.cancelled > 0) parts.push(`${c.cancelled} ${c.cancelled === 1 ? 'cancelada' : 'canceladas'}`);
-  return parts.join(' · ');
 }
 
 export function formatTime(iso: string | null): string {
@@ -102,14 +64,15 @@ export function formatTime(iso: string | null): string {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-/** 102 000 ms → "1m 42s"; acima de uma hora, "1h 05m". */
+/** Duração legível: "4 s", "1 min 5 s", "1 h 2 min" (zeros à direita omitidos: "1 min", "1 h"). */
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
-  return `${m}m ${String(s).padStart(2, '0')}s`;
+  if (h > 0) return m > 0 ? `${h} h ${m} min` : `${h} h`;
+  if (m > 0) return s > 0 ? `${m} min ${s} s` : `${m} min`;
+  return `${s} s`;
 }
 
 /** Duração entre dois instantes; sem fim e ainda em andamento, até agora. */
@@ -119,20 +82,22 @@ export function durationText(startIso: string | null, endIso: string | null, now
   return end === null ? '—' : formatDuration(end - new Date(startIso).getTime());
 }
 
-/** O que a implantação instala ou remove: software do catálogo ou, fora dele, o produto. */
-export function deploymentTarget(d: Pick<DeploymentSummary, 'software' | 'product'>): {
-  name: string;
-  version: string | null;
-  inCatalog: boolean;
-} {
-  if (d.software) return { name: d.software.name, version: d.software.version, inCatalog: true };
-  return { name: d.product?.name ?? '—', version: d.product?.version ?? null, inCatalog: false };
+/**
+ * Título curto da implantação: "7-Zip 26.06" (nome + versão do catálogo). Fora do catálogo, o
+ * nome do produto como está no inventário; versão e ProductCode vão para a dica (`tip`).
+ * A ação (instalar/desinstalar) não entra: fica só no selo.
+ */
+export function deploymentTitle(d: Pick<DeploymentSummary, 'software' | 'product'>): { title: string; tip: string | null } {
+  if (d.software) return { title: `${d.software.name} ${d.software.version}`, tip: null };
+  const p = d.product;
+  const tip = [p?.version && `Versão ${p.version}`, p?.productCode && `ProductCode ${p.productCode}`].filter(Boolean).join(' · ');
+  return { title: p?.name ?? '—', tip: tip || null };
 }
 
 /** Selo para produto desinstalado que não está no catálogo. */
 export function OutsideCatalogBadge() {
   return (
-    <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-amber-800">
+    <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-meta font-medium whitespace-nowrap text-amber-800">
       Fora do catálogo
     </span>
   );
@@ -141,20 +106,34 @@ export function OutsideCatalogBadge() {
 /** Selo para desinstalação pelo comando do fabricante (programa que não é MSI). */
 export function VendorBadge() {
   return (
-    <span className="inline-flex rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-orange-800">
+    <span className="inline-flex rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-meta font-medium whitespace-nowrap text-orange-800">
       Comando do fabricante
     </span>
   );
 }
 
-/** Selo "Instalação" / "Desinstalação" (Monitoramento, Histórico, Dashboard). */
+/**
+ * Selos da implantação nas listas (Monitoramento, Histórico, Dashboard): só o que foge da
+ * instalação comum — "Desinstalação", "Fora do catálogo", "Comando do fabricante". Uma
+ * instalação do catálogo não ganha selo.
+ */
+export function DeploymentBadges({ deployment: d }: { deployment: Pick<DeploymentSummary, 'action' | 'software' | 'vendorCommand'> }) {
+  return (
+    <>
+      {d.action === 'UNINSTALL' && <ActionBadge action="UNINSTALL" />}
+      {d.vendorCommand ? <VendorBadge /> : !d.software && <OutsideCatalogBadge />}
+    </>
+  );
+}
+
+/** Selo "Instalação" / "Desinstalação". */
 export function ActionBadge({ action }: { action: DeploymentAction }) {
   return action === 'UNINSTALL' ? (
-    <span className="inline-flex rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-violet-700">
+    <span className="inline-flex rounded-md border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-meta font-medium whitespace-nowrap text-violet-700">
       Desinstalação
     </span>
   ) : (
-    <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-slate-600">
+    <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-meta font-medium whitespace-nowrap text-slate-600">
       Instalação
     </span>
   );
@@ -176,7 +155,7 @@ export function MineToggle({ mine, onChange }: { mine: boolean; onChange: (mine:
       role="radio"
       aria-checked={mine === value}
       onClick={() => mine !== value && onChange(value)}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
+      className={`rounded-md px-3 py-1.5 text-body font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
         mine === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
       }`}
     >

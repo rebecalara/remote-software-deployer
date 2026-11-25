@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { CheckCircleIcon, ChevronLeftIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
+import { ActionBar } from '../../components/ActionBar';
+import type { Feedback } from '../../components/FeedbackMessage';
+import { ChevronLeftIcon, ChevronRightIcon, PlayIcon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
 import { useNow } from '../../hooks/useNow';
 import { ApiError, SessionExpiredError } from '../../services/apiClient';
-import { createDeployment } from '../../services/deploymentService';
+import { createDeployment, getDeploymentLimits } from '../../services/deploymentService';
 import { collectInventory, getInventorySummary } from '../../services/inventoryService';
 import { listMachines } from '../../services/machineService';
 import { listSoftware } from '../../services/softwareService';
-import { MAX_TARGETS_PER_DEPLOYMENT, type Deployment, type DeploymentAction } from '../../types/deployment';
+import type { DeploymentAction } from '../../types/deployment';
 import type { Machine } from '../../types/machine';
 import type { InventorySummary } from '../../types/inventory';
 import type { Software } from '../../types/software';
-import { deploymentTarget } from './deploymentUi';
+import type { MonitoringLocationState } from '../Monitoring/MonitoringPage';
 import { MachineStep } from './MachineStep';
-import { ConfirmStep, ReviewStep } from './ReviewStep';
+import { ReviewStep } from './ReviewStep';
 import { SoftwareStep, unavailableReason } from './SoftwareStep';
 import { UninstallChoices, type ConsultProgress } from './UninstallChoices';
 import { fromInventory, machinesToConsult, type UninstallTarget } from './uninstallTarget';
@@ -30,14 +32,13 @@ export interface NewDeploymentLocationState {
   /** Atalho "Desinstalar" do inventário: programa (não MSI) pelo comando do fabricante. */
   programId?: string;
   action?: DeploymentAction;
-  /** Abre no passo 3 (Revisar); a confirmação continua no passo 4. */
+  /** Abre direto no passo Revisar (onde fica o "Iniciar"). */
   startAtReview?: boolean;
 }
 
 const MACHINES = 0;
 const SOFTWARE = 1;
 const REVIEW = 2;
-const EXECUTE = 3;
 
 /** "Consultar agora": consultas ao mesmo tempo (o limite do servidor) e espera no 429. */
 const CONSULT_PARALLEL = 5;
@@ -48,10 +49,19 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Confirmação obrigatória: produto fora do catálogo ou comando do fabricante. */
 const needsConfirm = (t: UninstallTarget) => t.method === 'VENDOR' || !t.inCatalog;
 
+const BUTTON_SECONDARY =
+  'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-body font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60';
+const BUTTON_PRIMARY =
+  'inline-flex items-center gap-1.5 rounded-lg border border-transparent bg-blue-700 px-4 py-2 text-body font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50';
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : 'Erro inesperado.';
 }
 
+/**
+ * Nova Implantação em 3 passos: Máquinas → Software → Revisar. O "Iniciar" fica no Revisar;
+ * depois de iniciar, a tela vai direto ao Monitoramento com a implantação aberta.
+ */
 export function NewDeploymentPage() {
   const { user } = useAuth();
   const canDeploy = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
@@ -76,7 +86,7 @@ export function NewDeploymentPage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initial?.machineIds ?? []));
   const [action, setAction] = useState<DeploymentAction>(initial?.action ?? 'INSTALL');
   const [softwareId, setSoftwareId] = useState<string | null>(initial?.softwareId ?? null);
-  // Desinstalação: o que remover (do inventário ou do catálogo) e o inventário das máquinas.
+  // Desinstalação: o que remover (do inventário) e o inventário das máquinas.
   const [uninstallTarget, setUninstallTarget] = useState<UninstallTarget | null>(null);
   const [inventorySummary, setInventorySummary] = useState<InventorySummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -84,7 +94,9 @@ export function NewDeploymentPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [created, setCreated] = useState<Deployment | null>(null);
+  // Trava contra clique duplo: o estado "submitting" só desativa o botão no próximo desenho
+  // da tela, e um segundo clique rápido chegaria antes (mesmo padrão dos botões de Máquinas).
+  const submittingRef = useRef(false);
 
   const loadMachines = useCallback(async () => {
     try {
@@ -102,7 +114,6 @@ export function NewDeploymentPage() {
 
   const loadSoftware = useCallback(async () => {
     try {
-      // Inclui os desativados: a desinstalação aceita (o passo 2 os esconde ao instalar).
       setSoftware(await listSoftware(true));
       setSoftwareError(null);
     } catch (err) {
@@ -110,23 +121,30 @@ export function NewDeploymentPage() {
     }
   }, []);
 
+  // Máquinas por implantação: vem do backend (DEPLOYMENT_MAX_MACHINES). Se a leitura falhar,
+  // a tela não confere antes de enviar — o servidor confere de qualquer jeito (400).
+  const [maxMachines, setMaxMachines] = useState<number | null>(null);
+
   useEffect(() => {
     if (!canDeploy) return;
     void loadMachines();
     void loadSoftware();
+    getDeploymentLimits()
+      .then((l) => setMaxMachines(l.maxMachines))
+      .catch(() => setMaxMachines(null));
   }, [canDeploy, loadMachines, loadSoftware]);
 
-  // Trocar de passo volta ao topo (a barra do rodapé continua fixa).
+  // Trocar de passo volta ao topo (a barra de baixo continua visível).
   useEffect(() => {
     top.current?.scrollIntoView({ block: 'start' });
-  }, [step, created]);
+  }, [step]);
 
   const selectedMachines = useMemo(
     () => (machines ?? []).filter((m) => selected.has(m.id)).sort((a, b) => a.hostname.localeCompare(b.hostname)),
     [machines, selected],
   );
   const chosen = software?.find((s) => s.id === softwareId) ?? null;
-  const overLimit = selected.size > MAX_TARGETS_PER_DEPLOYMENT;
+  const overLimit = maxMachines !== null && selected.size > maxMachines;
   const uninstall = action === 'UNINSTALL';
   const selectedKey = [...selected].sort().join(',');
 
@@ -205,7 +223,6 @@ export function NewDeploymentPage() {
     }
   }, [machines, software, selected, chosen, action, presetFromInventory, presetProductCode, presetProgramId, inventorySummary, summaryError]);
 
-  // Desinstalação: o que aparece no rodapé e na revisão.
   const target = uninstall ? uninstallTarget : null;
   const targetName = uninstall
     ? target
@@ -214,6 +231,7 @@ export function NewDeploymentPage() {
     : chosen
       ? `${chosen.name} ${chosen.version}`
       : null;
+  const mustConfirm = target !== null && needsConfirm(target);
 
   const canAdvance =
     step === MACHINES
@@ -222,264 +240,190 @@ export function NewDeploymentPage() {
         ? uninstall
           ? uninstallTarget !== null
           : chosen !== null && unavailableReason(chosen, action) === null && chosen.active
-        : true;
+        : false;
+  const canStart = step === REVIEW && (uninstall ? target !== null : chosen !== null) && (!mustConfirm || confirmed);
 
   function changeAction(next: DeploymentAction) {
     setAction(next);
     setUninstallTarget(null);
     setConfirmed(false);
-    // O software escolhido pode não valer para a outra ação (ex.: EXE ao desinstalar).
     if (chosen && (unavailableReason(chosen, next) !== null || (next === 'INSTALL' && !chosen.active))) setSoftwareId(null);
   }
 
   async function start() {
-    if (submitting || (uninstall ? !target : !chosen)) return;
-    if (target && needsConfirm(target) && !confirmed) return;
+    if (submittingRef.current || !canStart) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
     const machineIds = selectedMachines.map((m) => m.id);
     try {
-      setCreated(
-        await createDeployment(
-          uninstall
-            ? target!.method === 'VENDOR'
-              ? { action, programId: target!.programId!, machineIds }
-              : { action, productCode: target!.productCode!, machineIds }
-            : { action, softwareId: chosen!.id, machineIds },
-        ),
+      const created = await createDeployment(
+        uninstall
+          ? target!.method === 'VENDOR'
+            ? { action, programId: target!.programId!, machineIds }
+            : { action, productCode: target!.productCode!, machineIds }
+          : { action, softwareId: chosen!.id, machineIds },
       );
+      const feedback: Feedback = {
+        kind: 'success',
+        text: `${uninstall ? 'Desinstalação iniciada' : 'Implantação iniciada'}: ${targetName} → ${plural(
+          created.targets.length,
+          'máquina',
+          'máquinas',
+        )}.`,
+      };
+      // Direto para o acompanhamento, com a implantação aberta e a mensagem de sucesso.
+      navigate(`/monitoring?open=${created.id}`, { state: { feedback } satisfies MonitoringLocationState });
     } catch (err) {
       if (!(err instanceof SessionExpiredError)) setSubmitError(messageOf(err));
-    } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
-  }
-
-  function restart() {
-    setCreated(null);
-    setSelected(new Set());
-    setSoftwareId(null);
-    setUninstallTarget(null);
-    setConfirmed(false);
-    setConsult(NO_CONSULT);
-    setAction('INSTALL');
-    setSubmitError(null);
-    setStep(MACHINES);
-    navigate(location.pathname, { replace: true, state: null });
   }
 
   if (!canDeploy) {
     return (
       <div className="p-4 sm:p-6">
         <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
-          <p className="text-sm font-medium text-slate-700">Somente Administradores e Operadores iniciam implantações.</p>
-          <p className="mt-1 text-sm text-slate-500">Seu perfil permite consultar máquinas e o catálogo.</p>
+          <p className="text-body font-medium text-slate-700">Somente Administradores e Operadores iniciam implantações.</p>
+          <p className="mt-1 text-body text-slate-500">Seu perfil permite consultar máquinas e o catálogo.</p>
         </div>
       </div>
     );
   }
 
-  if (created) {
-    return (
-      <div ref={top} className="p-4 sm:p-6">
-        <SuccessView deployment={created} onRestart={restart} />
-      </div>
-    );
-  }
-
-  // ---------- barra fixa do rodapé ----------
+  // ---------- barra de baixo ----------
 
   let summary: ReactNode;
   if (step === MACHINES) {
     summary = (
       <>
-        <span className="font-semibold text-slate-900">
+        <span className="font-medium text-slate-900">
           {selected.size === 0
             ? 'Nenhuma máquina selecionada'
             : `${plural(selected.size, 'máquina selecionada', 'máquinas selecionadas')}`}
         </span>
         {overLimit && (
-          <span className="text-red-700">· máximo de {MAX_TARGETS_PER_DEPLOYMENT} por implantação</span>
+          <span className="text-red-700" data-testid="over-limit">
+            · máximo de {maxMachines} por implantação
+          </span>
         )}
         {selected.size > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            className="text-slate-500 hover:text-slate-700 hover:underline"
-          >
+          <button type="button" onClick={() => setSelected(new Set())} className="text-slate-500 hover:text-slate-700 hover:underline">
             Limpar seleção
           </button>
         )}
       </>
     );
-  } else if (step === SOFTWARE) {
+  } else {
     summary = targetName ? (
-      <span className="font-semibold text-slate-900">
+      <span className="font-medium text-slate-900">
         {uninstall && 'Desinstalar '}
         {targetName}
-        <span className="font-normal text-slate-500"> · {plural(selected.size, 'máquina', 'máquinas')}</span>
+        <span className="font-normal text-slate-500"> → {plural(selected.size, 'máquina', 'máquinas')}</span>
       </span>
     ) : (
-      <span className="font-semibold text-slate-900">Nenhum software selecionado</span>
-    );
-  } else {
-    summary = (
-      <span className="font-semibold text-slate-900">
-        {uninstall && 'Desinstalar '}
-        {targetName} →{' '}
-        {plural(selectedMachines.length, 'máquina', 'máquinas')}
-      </span>
+      <span className="font-medium text-slate-900">Nenhum software selecionado</span>
     );
   }
 
-  return (
-    <div className="flex min-h-full flex-col">
-      <div ref={top} className="flex-1 space-y-4 p-4 sm:p-6">
-        <Stepper current={step} />
-
-        {step === MACHINES && (
-          <MachineStep
-            machines={machines}
-            loadError={machinesError}
-            onRetry={loadMachines}
-            selected={selected}
-            onChange={setSelected}
-            now={now}
-          />
-        )}
-        {step === SOFTWARE && (
-          <SoftwareStep
-            software={software}
-            loadError={softwareError}
-            onRetry={loadSoftware}
-            action={action}
-            onActionChange={changeAction}
-            selectedId={softwareId}
-            onSelect={setSoftwareId}
-            uninstallContent={
-              <UninstallChoices
-                summary={inventorySummary}
-                loadError={summaryError}
-                onRetry={loadSummary}
-                consult={consult}
-                onConsultNow={consultNow}
-                selectedKey={uninstallTarget?.key ?? null}
-                onSelect={(t) => {
-                  setUninstallTarget(t);
-                  setConfirmed(false);
-                }}
-              />
-            }
-          />
-        )}
-        {step === REVIEW && (machines === null || software === null) && (
-          <p className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500 shadow-sm">
-            Carregando…
-          </p>
-        )}
-        {step === REVIEW && machines !== null && (uninstall ? target : chosen) && (
-          <ReviewStep machines={selectedMachines} software={chosen} action={action} uninstallTarget={target} />
-        )}
-        {step === EXECUTE && (uninstall ? target : chosen) && (
-          <ConfirmStep
-            machineCount={selectedMachines.length}
-            targetName={targetName ?? ''}
-            action={action}
-            error={submitError}
-            requireConfirm={target !== null && needsConfirm(target)}
-            vendor={target?.method === 'VENDOR'}
-            confirmed={confirmed}
-            onConfirm={setConfirmed}
-          />
-        )}
-      </div>
-
-      {/* Fixa no rodapé em todos os passos: sempre visível, mesmo com centenas de máquinas na lista. */}
-      <div
-        data-testid="wizard-footer"
-        className="sticky bottom-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-slate-200 bg-white px-4 py-3 text-sm shadow-[0_-4px_12px_-6px_rgba(15,23,42,0.15)] sm:px-6"
-      >
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">{summary}</div>
-        <div className="ml-auto flex items-center gap-2">
-          {step === MACHINES ? (
-            <Link
-              to="/machines"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <ChevronLeftIcon className="h-4 w-4" />
-              Cancelar
-            </Link>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setSubmitError(null);
-                setStep(step - 1);
-              }}
-              disabled={submitting}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-            >
-              <ChevronLeftIcon className="h-4 w-4" />
-              Voltar
-            </button>
-          )}
-          {step < EXECUTE ? (
-            <button
-              type="button"
-              onClick={() => setStep(step + 1)}
-              disabled={!canAdvance}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Próximo
-              <ChevronRightIcon className="h-4 w-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={start}
-              disabled={submitting || (target !== null && needsConfirm(target) && !confirmed)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <PlayIcon className="h-4 w-4" />
-              {submitting ? 'Iniciando…' : action === 'UNINSTALL' ? 'Iniciar desinstalação' : 'Iniciar implantação'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SuccessView({ deployment, onRestart }: { deployment: Deployment; onRestart: () => void }) {
-  const count = deployment.targets.length;
-  const uninstall = deployment.action === 'UNINSTALL';
-  return (
-    <section className="mx-auto max-w-lg rounded-xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
-      <h2 className="text-xl font-semibold text-slate-900">{uninstall ? 'Desinstalação iniciada' : 'Implantação iniciada'}</h2>
-      <p className="mt-1 text-sm text-slate-500">
-        A {uninstall ? 'desinstalação' : 'instalação'} foi enfileirada para{' '}
-        <strong>{plural(count, 'máquina', 'máquinas')}</strong> e segue em segundo plano.
-      </p>
-      <p className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <CheckCircleIcon className="h-4 w-4 shrink-0 text-emerald-600" />
-        {deploymentTarget(deployment).name} <span className="font-mono">{deploymentTarget(deployment).version}</span> →{' '}
-        {plural(count, 'máquina', 'máquinas')}
-      </p>
-      <div className="mt-6 flex flex-wrap justify-center gap-3">
-        <Link
-          to={`/monitoring?open=${deployment.id}`}
-          className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
-        >
-          Ver acompanhamento
+  const actions = (
+    <>
+      {step === MACHINES ? (
+        <Link to="/machines" className={BUTTON_SECONDARY}>
+          <ChevronLeftIcon className="h-4 w-4" />
+          Cancelar
         </Link>
+      ) : (
         <button
           type="button"
-          onClick={onRestart}
-          className="rounded-lg px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          onClick={() => {
+            setSubmitError(null);
+            setStep(step - 1);
+          }}
+          disabled={submitting}
+          className={BUTTON_SECONDARY}
         >
-          Nova implantação
+          <ChevronLeftIcon className="h-4 w-4" />
+          Voltar
         </button>
-      </div>
-    </section>
+      )}
+      {step < REVIEW ? (
+        <button type="button" onClick={() => setStep(step + 1)} disabled={!canAdvance} className={BUTTON_PRIMARY}>
+          Próximo
+          <ChevronRightIcon className="h-4 w-4" />
+        </button>
+      ) : (
+        <button type="button" onClick={start} disabled={submitting || !canStart} className={BUTTON_PRIMARY}>
+          <PlayIcon className="h-4 w-4" />
+          {submitting ? 'Iniciando…' : uninstall ? 'Iniciar desinstalação' : 'Iniciar implantação'}
+        </button>
+      )}
+    </>
+  );
+
+  return (
+    <div ref={top} className="space-y-4 p-4 sm:p-6">
+      <Stepper current={step} />
+
+      {step === MACHINES && (
+        <MachineStep
+          machines={machines}
+          loadError={machinesError}
+          onRetry={loadMachines}
+          selected={selected}
+          onChange={setSelected}
+          now={now}
+        />
+      )}
+      {step === SOFTWARE && (
+        <SoftwareStep
+          software={software}
+          loadError={softwareError}
+          onRetry={loadSoftware}
+          action={action}
+          onActionChange={changeAction}
+          selectedId={softwareId}
+          onSelect={setSoftwareId}
+          renderUninstall={(search) => (
+            <UninstallChoices
+              summary={inventorySummary}
+              search={search}
+              loadError={summaryError}
+              onRetry={loadSummary}
+              consult={consult}
+              onConsultNow={consultNow}
+              selectedKey={uninstallTarget?.key ?? null}
+              onSelect={(t) => {
+                setUninstallTarget(t);
+                setConfirmed(false);
+              }}
+            />
+          )}
+        />
+      )}
+      {step === REVIEW && (machines === null || software === null) && (
+        <p className="rounded-xl border border-slate-200 bg-white px-6 py-10 text-center text-body text-slate-500 shadow-sm">
+          Carregando…
+        </p>
+      )}
+      {step === REVIEW && machines !== null && (uninstall ? target : chosen) && (
+        <ReviewStep
+          machines={selectedMachines}
+          software={chosen}
+          action={action}
+          uninstallTarget={target}
+          requireConfirm={mustConfirm}
+          confirmed={confirmed}
+          onConfirm={setConfirmed}
+          error={submitError}
+        />
+      )}
+
+      {/* Sempre visível no pé da lista, mesmo com centenas de máquinas (mesma barra de Máquinas). */}
+      <ActionBar testId="wizard-footer" actions={actions}>
+        {summary}
+      </ActionBar>
+    </div>
   );
 }

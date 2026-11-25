@@ -2,6 +2,12 @@
 import type { InstallType } from './software';
 
 export type DeploymentStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+/**
+ * Status de uma IMPLANTAÇÃO como a API devolve: o do banco mais PARTIAL, calculado pelo
+ * backend (FAILED em que alguma máquina concluiu). "Falhou" = nenhuma máquina concluiu.
+ * Máquinas (DeploymentTarget) nunca são PARTIAL.
+ */
+export type DeploymentDisplayStatus = DeploymentStatus | 'PARTIAL';
 /** Instalar ou desinstalar (desinstalar só existe para MSI). */
 export type DeploymentAction = 'INSTALL' | 'UNINSTALL';
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
@@ -38,7 +44,7 @@ export interface DeploymentSummary {
   id: string;
   name: string;
   action: DeploymentAction;
-  status: DeploymentStatus;
+  status: DeploymentDisplayStatus;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -69,8 +75,10 @@ export interface DeploymentCreateInput {
   name?: string;
 }
 
-/** Limite do backend (deployment-validation.ts: MAX_TARGETS_PER_DEPLOYMENT). */
-export const MAX_TARGETS_PER_DEPLOYMENT = 50;
+/** GET /deployments/limits — máquinas por implantação (DEPLOYMENT_MAX_MACHINES no backend). */
+export interface DeploymentLimits {
+  maxMachines: number;
+}
 
 /** GET /deployments/summary — contadores do painel de Monitoramento. */
 export interface DeploymentOverview {
@@ -81,7 +89,8 @@ export interface DeploymentOverview {
   pendingTargets: number;
   windowHours: number;
   /** Implantações encerradas nas últimas `windowHours` horas, por status final. */
-  finishedInWindow: { succeeded: number; failed: number; cancelled: number };
+  /** failed = nenhuma máquina concluiu; partial = alguma concluiu e alguma falhou. */
+  finishedInWindow: { succeeded: number; partial: number; failed: number; cancelled: number };
 }
 
 /** GET /deployments — uma página da lista, com o total para a paginação. */
@@ -96,7 +105,7 @@ export interface DeploymentPage {
 export interface DeploymentListFilters {
   page?: number;
   pageSize?: number;
-  status?: DeploymentStatus;
+  status?: DeploymentDisplayStatus;
   softwareId?: string;
   machine?: string;
   from?: string;
@@ -117,7 +126,7 @@ export interface DashboardActivity {
   by: string | null;
   deploymentId?: string;
   action?: DeploymentAction;
-  status?: DeploymentStatus;
+  status?: DeploymentDisplayStatus;
   succeeded?: number;
   failed?: number;
   total?: number;
@@ -130,11 +139,16 @@ export interface DashboardActivity {
 export interface SystemCheck {
   ok: boolean;
   detail: string | null;
+  /** 'refused' = respondeu e recusou a conta (AD/LDAP); 'no-response' = não respondeu. */
+  reason: 'refused' | 'no-response' | null;
 }
 
 export interface DashboardData {
   machines: { total: number; seenInLastSync: number; lastSyncAt: string | null };
-  deployments: DeploymentOverview & { failureRate: number | null };
+  /** Presentes no AD que responderam na porta do WinRM; available false = desligada (sem WinRM). */
+  reachability: { available: boolean; detail: string | null; responding: number; total: number; checkedAt: string | null };
+  /** Sobre concluídas + parciais + falhas da janela (sem canceladas); null sem nenhuma. */
+  deployments: DeploymentOverview & { failureRate: number | null; successRate: number | null };
   activity: DashboardActivity[];
   system: {
     database: SystemCheck;

@@ -2,7 +2,8 @@ import { Fragment, useEffect, useRef } from 'react';
 import type { Deployment, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime } from '../../utils/format';
 import { DeploymentPanel } from './DeploymentPanel';
-import { ActionBadge, OutsideCatalogBadge, StatusBadge, VendorBadge, countsText, deploymentTarget, durationText } from './deploymentUi';
+import { Tooltip } from '../../components/Tooltip';
+import { DeploymentBadges, StatusBadge, deploymentTitle, durationText } from './deploymentUi';
 
 // Lista de implantações do Monitoramento e do Histórico. Cada linha expande ali mesmo
 // (acordeão) e mostra o DeploymentPanel: máquinas, fases, logs e "Cancelar pendentes".
@@ -16,6 +17,7 @@ export function DeploymentTable({
   now,
   onPanelUpdate,
   ariaLabel,
+  hideRequester = false,
 }: {
   items: DeploymentSummary[];
   openIds: ReadonlySet<string>;
@@ -24,6 +26,8 @@ export function DeploymentTable({
   now: number;
   onPanelUpdate?: (deployment: Deployment) => void;
   ariaLabel: string;
+  /** "Minhas implantações": quem pediu é sempre a própria pessoa — a coluna sai. */
+  hideRequester?: boolean;
 }) {
   const scrolled = useRef<string | null>(null);
   useEffect(() => {
@@ -37,15 +41,17 @@ export function DeploymentTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[880px] text-left text-sm" aria-label={ariaLabel}>
-        <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
+      {/* Abaixo de 1280 px, "Solicitada por" e "Criada em" saem (estão no painel ao abrir), para
+          a tabela caber sem rolagem lateral. */}
+      <table className="w-full text-left text-body xl:min-w-[880px]" aria-label={ariaLabel}>
+        <thead className="border-b border-slate-200 bg-slate-50 text-meta font-semibold tracking-wide whitespace-nowrap text-slate-500 uppercase">
           <tr>
             <th scope="col" className="w-10 px-3 py-3" aria-label="Expandir" />
             <th scope="col" className="px-4 py-3">Implantação</th>
             <th scope="col" className="px-4 py-3">Máquinas</th>
             <th scope="col" className="px-4 py-3">Status</th>
-            <th scope="col" className="px-4 py-3">Solicitada por</th>
-            <th scope="col" className="px-4 py-3">Criada em</th>
+            {!hideRequester && <th scope="col" className="hidden px-4 py-3 xl:table-cell">Solicitada por</th>}
+            <th scope="col" className="hidden px-4 py-3 xl:table-cell">Criada em</th>
             <th scope="col" className="px-4 py-3">Duração</th>
           </tr>
         </thead>
@@ -53,6 +59,7 @@ export function DeploymentTable({
           {items.map((d) => {
             const open = openIds.has(d.id);
             const highlighted = d.id === highlightId;
+            const { title, tip } = deploymentTitle(d);
             return (
               <Fragment key={d.id}>
                 <tr
@@ -64,7 +71,7 @@ export function DeploymentTable({
                     <button
                       type="button"
                       aria-expanded={open}
-                      aria-label={`${open ? 'Recolher' : 'Expandir'} ${d.name}`}
+                      aria-label={`${open ? 'Recolher' : 'Expandir'} ${title}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onToggle(d.id);
@@ -78,27 +85,32 @@ export function DeploymentTable({
                   </td>
                   <td className="px-4 py-3">
                     <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
-                      <span>{d.name}</span>
-                      <ActionBadge action={d.action} />
-                    </p>
-                    <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                      <span>
-                        {deploymentTarget(d).name} <span className="font-mono">{deploymentTarget(d).version}</span>
-                      </span>
-                      {d.vendorCommand ? <VendorBadge /> : !deploymentTarget(d).inCatalog && <OutsideCatalogBadge />}
+                      {tip ? (
+                        <Tooltip content={tip}>
+                          <span tabIndex={0} data-testid="deployment-title">
+                            {title}
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <span data-testid="deployment-title">{title}</span>
+                      )}
+                      <DeploymentBadges deployment={d} />
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{countsText(d.counts)}</td>
+                  {/* Só a quantidade; "N de M concluídas" fica na dica do Parcial e nas abas ao abrir. */}
+                  <td className="px-4 py-3 text-slate-600 tabular-nums">{d.counts.total}</td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={d.status} />
+                    <StatusBadge status={d.status} counts={d.counts} />
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                    {d.requestedBy.displayName || d.requestedBy.username}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">
+                  {!hideRequester && (
+                    <td className="hidden px-4 py-3 whitespace-nowrap text-slate-600 xl:table-cell">
+                      {d.requestedBy.displayName || d.requestedBy.username}
+                    </td>
+                  )}
+                  <td className="hidden px-4 py-3 text-body whitespace-nowrap text-slate-600 xl:table-cell">
                     {formatDateTime(d.createdAt)}
                   </td>
-                  <td className="px-4 py-3 font-mono text-[13px] whitespace-nowrap text-slate-600">
+                  <td className="px-4 py-3 text-body whitespace-nowrap text-slate-600 tabular-nums">
                     {durationText(d.startedAt, d.finishedAt, now, d.finishedAt === null)}
                   </td>
                 </tr>

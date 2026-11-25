@@ -1,7 +1,9 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import logo from '../../assets/logo.png';
+import { RsdLoginBrand } from '../../components/brand/RsdLoginBrand';
+import { RsdMark } from '../../components/brand/RsdMark';
+import { RsdWordmark } from '../../components/brand/RsdWordmark';
 import { EyeIcon, EyeOffIcon } from '../../components/icons';
 import { safeRedirectPath } from '../../routes/safeRedirect';
 
@@ -18,6 +20,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const capsLock = useCapsLock();
 
   if (isAuthenticated) {
     return <Navigate to={from} replace />;
@@ -41,23 +44,11 @@ export function LoginPage() {
       {/* Painel institucional — some em telas pequenas */}
       <aside className="relative hidden w-1/2 flex-col overflow-hidden bg-slate-950 text-white lg:flex">
         <div className="relative flex flex-1 flex-col items-center justify-center px-12 text-center">
-          {/* O PNG tem margem branca em volta do quadro cinza; o scale + overflow só recorta essa margem */}
-          <div className="h-36 w-36 overflow-hidden rounded-3xl shadow-2xl shadow-black/50 ring-1 ring-white/10 xl:h-40 xl:w-40">
-            <img
-              src={logo}
-              alt="Brasão da Prefeitura de Joinville"
-              className="h-full w-full scale-[1.18] object-contain"
-            />
-          </div>
-
-          <h2 className="mt-10 text-4xl leading-tight font-semibold tracking-tight xl:text-5xl">
-            Remote Software
-            <span className="block font-bold text-blue-400">Deployer</span>
-          </h2>
+          <RsdLoginBrand />
         </div>
 
         {/* Absoluto para não empurrar o conteúdo: assim ele fica no centro exato do painel */}
-        <footer className="absolute inset-x-0 bottom-0 border-t border-white/5 px-12 py-6 text-center text-xs tracking-wide text-slate-500">
+        <footer className="absolute inset-x-0 bottom-0 border-t border-white/5 px-12 py-6 text-center text-meta tracking-wide text-slate-500">
           Sistema desenvolvido para o Departamento de Tecnologia da Informação — Prefeitura de
           Joinville, SC
         </footer>
@@ -67,27 +58,23 @@ export function LoginPage() {
         <div className="w-full max-w-md">
           {/* Identidade compacta para quando o painel institucional está oculto */}
           <div className="mb-8 flex items-center justify-center gap-4 lg:hidden">
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-2xl shadow-md">
-              <img
-                src={logo}
-                alt="Brasão da Prefeitura de Joinville"
-                className="h-full w-full scale-[1.18] object-contain"
-              />
+            <RsdMark className="h-14 w-14 shrink-0" />
+            <div className="leading-tight">
+              <p>
+                <RsdWordmark className="text-stat" />
+              </p>
+              <p className="text-meta tracking-wider text-slate-500 uppercase">Remote Software Deployer</p>
             </div>
-            <p className="text-xl leading-tight font-semibold tracking-tight text-slate-900">
-              Remote Software
-              <span className="block font-bold text-blue-700">Deployer</span>
-            </p>
           </div>
 
           <div className="rounded-2xl bg-white p-8 shadow-lg">
-            <h1 className="text-2xl font-bold text-slate-900">Entrar no sistema</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <h1 className="text-page font-semibold text-slate-900">Entrar no sistema</h1>
+            <p className="mt-1 text-body text-slate-500">
               Utilize suas credenciais de rede institucionais
             </p>
 
             {sessionExpired && !error && (
-              <p role="status" className="mt-6 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p role="status" className="mt-6 rounded-lg bg-amber-50 px-3 py-2 text-body text-amber-800">
                 Sua sessão expirou. Entre novamente para continuar.
               </p>
             )}
@@ -107,13 +94,22 @@ export function LoginPage() {
                 />
               </Field>
 
-              <Field label="Senha" htmlFor="password">
+              <Field
+                label="Senha"
+                htmlFor="password"
+                after={
+                  // Sempre montado (vazio quando desligado): assim o leitor de tela anuncia quando aparece.
+                  <p id="caps-lock-warning" role="status" aria-live="polite" className={`text-meta font-medium text-amber-700 ${capsLock ? 'mt-1.5' : ''}`}>
+                    {capsLock ? 'Caps Lock ativado' : ''}
+                  </p>
+                }
+              >
                 <input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   required
-                  placeholder="••••••••"
+                  aria-describedby="caps-lock-warning"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-transparent text-slate-900 outline-none placeholder:text-slate-400"
@@ -129,7 +125,7 @@ export function LoginPage() {
               </Field>
 
               {error && (
-                <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-body text-red-700">
                   {error}
                 </p>
               )}
@@ -149,15 +145,38 @@ export function LoginPage() {
   );
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
+/**
+ * Caps Lock ligado? Lido de qualquer tecla ou clique na página (getModifierState); começa
+ * desligado, porque o navegador só informa o estado num evento de teclado ou mouse.
+ */
+function useCapsLock(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const read = (e: KeyboardEvent | MouseEvent) => {
+      if (typeof e.getModifierState === 'function') setOn(e.getModifierState('CapsLock'));
+    };
+    window.addEventListener('keydown', read);
+    window.addEventListener('keyup', read);
+    window.addEventListener('mousedown', read);
+    return () => {
+      window.removeEventListener('keydown', read);
+      window.removeEventListener('keyup', read);
+      window.removeEventListener('mousedown', read);
+    };
+  }, []);
+  return on;
+}
+
+function Field({ label, htmlFor, children, after }: { label: string; htmlFor: string; children: ReactNode; after?: ReactNode }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-slate-700">
+      <label htmlFor={htmlFor} className="mb-1.5 block text-body font-medium text-slate-700">
         {label}
       </label>
       <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20">
         {children}
       </div>
+      {after}
     </div>
   );
 }
