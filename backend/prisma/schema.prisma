@@ -171,6 +171,12 @@ model Deployment {
 
   @@index([userId])
   @@index([softwareId])
+  /// Ordem de todas as listas (createdAt desc, id desc) e filtro por período (Histórico, CSV).
+  @@index([createdAt, id])
+  /// Em andamento (finishedAt nulo), encerradas nas últimas 24 h e resumo do Dashboard.
+  @@index([finishedAt])
+  /// Filtro Instalação / Desinstalação do Histórico.
+  @@index([action])
 }
 
 model DeploymentTarget {
@@ -191,6 +197,8 @@ model DeploymentTarget {
 
   @@unique([deploymentId, machineId])
   @@index([machineId])
+  /// Máquinas em execução/na fila (resumo, implantação duplicada) e status Parcial.
+  @@index([status])
 }
 
 model DeploymentLog {
