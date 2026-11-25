@@ -9,6 +9,7 @@ import {
   loadMsiInfoReaderConfig,
   parseMsiInfoOutput,
 } from './msi-info-reader';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from '../deployments/testing/real-powershell';
 
 // ProductCode lido no servidor, no envio do MSI (desinstalação remota).
 
@@ -74,13 +75,13 @@ describe('MsiInfoReader', () => {
       });
       // O pacote foi solto: dá para apagar logo em seguida.
       await expect(fsp.rm(path)).resolves.toBeUndefined();
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('recusa arquivo com nome fora do padrão do sistema', async () => {
       const path = join(dir, 'qualquer.msi');
       await fsp.copyFile(sample, path);
       const reader = new MsiInfoReader(loadMsiInfoReaderConfig({ SystemRoot: process.env.SystemRoot }));
       expect(await reader.read(path)).toEqual({ ok: false, message: 'Nome do arquivo inválido.' });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
   });
 });

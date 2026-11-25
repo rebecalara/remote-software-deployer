@@ -8,6 +8,7 @@ import {
   programId,
   vendorUninstallEnabled,
 } from './vendor-uninstall';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './testing/real-powershell';
 
 // Exceção controlada: comando de desinstalação do fabricante (programa que não é MSI).
 // Os MESMOS casos rodam no validador do servidor (TypeScript) e no da máquina (PowerShell).
@@ -79,5 +80,5 @@ onWindows('uninstall-command-rules.ps1 (máquina) — mesmos casos, mesmo result
         reason: 'reason' in ts ? ts.reason : undefined,
       });
     });
-  }, 30_000);
+  }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 });

@@ -25,6 +25,7 @@ import {
 } from '../deployments/powershell-executor';
 import { InventoryController } from './inventory.controller';
 import { InventoryService, MAX_CONCURRENT_INVENTORIES } from './inventory.service';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from '../deployments/testing/real-powershell';
 
 // RF08: inventário de software por máquina (consulta ao vivo, só leitura).
 
@@ -190,11 +191,11 @@ describe('inventory-target.ps1', () => {
         { encoding: 'utf8', windowsHide: true },
       );
       expect(r.stdout.trim()).toBe('0');
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('recusa nome de máquina inválido antes de qualquer conexão', async () => {
       expect(await real.inventory('PC 01; Remove-Item')).toEqual({ ok: false, reason: 'invalid-input', message: 'Nome de máquina inválido.' });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('nome que não existe no DNS (domínio reservado .invalid), com acentos intactos', async () => {
       expect(await real.inventory('rsd-inexistente.invalid')).toEqual({
@@ -202,13 +203,13 @@ describe('inventory-target.ps1', () => {
         reason: 'dns',
         message: 'O nome rsd-inexistente.invalid não foi encontrado no DNS.',
       });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('endereço que não responde (192.0.2.1, reservado para documentação) → "não respondeu"', async () => {
       const result = await real.inventory('192.0.2.1');
       expect(result).toMatchObject({ ok: false, reason: 'unreachable' });
       expect('message' in result && result.message).toContain('não respondeu na porta 5985');
-    }, 20_000);
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
   });
 });
 

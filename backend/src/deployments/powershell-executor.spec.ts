@@ -20,6 +20,7 @@ import {
   redact,
   toAsciiJson,
 } from './powershell-executor';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './testing/real-powershell';
 
 const FAKE = join(__dirname, 'testing', 'fake-powershell.js');
 const PASSWORD = 'S3nha-Ç0m-Acênto!';
@@ -325,13 +326,13 @@ describe('deploy-target.ps1', () => {
         { encoding: 'utf8', windowsHide: true },
       );
       expect(r.stdout.trim()).toBe('0');
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('recusa nome de máquina inválido antes de qualquer conexão', async () => {
       const { result, events } = await runWith(real, input('PC 01; Remove-Item', { installerPath }));
       expect(result).toEqual({ ok: false, phase: 'validate', reason: 'invalid-input', message: 'Nome de máquina inválido.' });
       expect(events).toEqual([]);
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('relata nome que não existe no DNS (domínio reservado .invalid), com acentos intactos', async () => {
       const { result } = await runWith(real, input('rsd-inexistente.invalid', { installerPath }));
@@ -341,6 +342,6 @@ describe('deploy-target.ps1', () => {
         reason: 'dns',
         message: 'O nome rsd-inexistente.invalid não foi encontrado no DNS.',
       });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
   });
 });

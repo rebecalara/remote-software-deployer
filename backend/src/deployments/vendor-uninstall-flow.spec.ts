@@ -20,6 +20,7 @@ import {
 } from './powershell-executor';
 import { createInMemoryPrisma } from './testing/in-memory-prisma';
 import { VENDOR_UNINSTALL_DISABLED, programId } from './vendor-uninstall';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './testing/real-powershell';
 
 // Desinstalação de programa que NÃO é MSI pelo comando do fabricante (exceção controlada).
 
@@ -332,16 +333,16 @@ describe('uninstall-program-target.ps1', () => {
     it('sem erro de sintaxe', () => {
       const r = spawnSync(base.command, ['-NoProfile', '-NonInteractive', '-Command', `$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${PROGRAM_UNINSTALL_SCRIPT_PATH}', [ref]$null, [ref]$e); $e.Count`], { encoding: 'utf8', windowsHide: true });
       expect(r.stdout.trim()).toBe('0');
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
     it('entrada inválida recusada antes de qualquer conexão', async () => {
       expect(await real.uninstallProgram({ ...ok, computerName: 'PC 01; x' }, () => undefined)).toEqual(invalid('Nome de máquina inválido.'));
       expect(await real.uninstallProgram({ ...ok, arch: '16' as never }, () => undefined)).toEqual(invalid('Visão do registro inválida.'));
       expect(await real.uninstallProgram({ ...ok, uninstallKey: '..\\Run' }, () => undefined)).toEqual(invalid('Subchave do registro inválida.'));
       expect(await real.uninstallProgram({ ...ok, uninstallKey: '7-Zip*' }, () => undefined)).toEqual(invalid('Subchave do registro inválida.'));
       expect(await real.uninstallProgram({ ...ok, command: 'x'.repeat(1025) }, () => undefined)).toEqual(invalid('Comando inválido.'));
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
     it('entrada válida segue para a resolução de nome (DNS .invalid)', async () => {
       expect(await real.uninstallProgram(ok, () => undefined)).toMatchObject({ ok: false, reason: 'dns' });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
   });
 });

@@ -17,6 +17,7 @@ import {
   parseLine,
 } from './powershell-executor';
 import { createInMemoryPrisma } from './testing/in-memory-prisma';
+import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './testing/real-powershell';
 
 // Desinstalação remota (só MSI): acréscimo fora do RFC, aprovado pela autora.
 
@@ -313,7 +314,7 @@ describe('deploy-target.ps1 — desinstalação', () => {
       const result = await real.run({ ...base, productCode: '{x}; Remove-Item C:\\' }, (e) => events.push(e));
       expect(result).toEqual(invalid('ProductCode inválido.'));
       expect(events).toEqual([]);
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('recusa desinstalação de EXE e campos da instalação misturados', async () => {
       expect(await real.run({ ...base, installType: 'EXE' as never }, () => undefined)).toEqual(
@@ -322,11 +323,11 @@ describe('deploy-target.ps1 — desinstalação', () => {
       expect(await real.run({ ...base, installArgs: ['/S'] } as never, () => undefined)).toEqual(
         invalid('Campo não aceito na desinstalação: installArgs.'),
       );
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
 
     it('com entrada válida, segue para a resolução de nome (DNS .invalid)', async () => {
       const result = await real.run(base, () => undefined);
       expect(result).toMatchObject({ ok: false, phase: 'resolve', reason: 'dns' });
-    });
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
   });
 });
