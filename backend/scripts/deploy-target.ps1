@@ -33,7 +33,10 @@ $ProgressPreference = 'SilentlyContinue'
 
 # Pasta de trabalho na maquina de destino. Sem espaco no caminho, de proposito:
 # o Start-Process -ArgumentList junta os itens com espaco, sem aspas.
-$RemoteBaseDir = 'C:\Windows\Temp\rsd'
+# So SYSTEM e Administradores, sem heranca, conferida antes de usar (temp-dir-rules.ps1):
+# usuario comum nao consegue pre-criar a pasta nem plantar arquivos ao lado do instalador.
+$RemoteBaseDir = 'C:\ProgramData\RSD'
+. (Join-Path $PSScriptRoot 'temp-dir-rules.ps1')
 
 class DeployFailure : System.Exception {
   [string] $Phase
@@ -291,13 +294,23 @@ try {
       throw [DeployFailure]::new('copy', 'smb-failed',
         "Não foi possível acessar \\$computer\C$ (compartilhamento administrativo, porta 445): $(Get-InnermostMessage $_)")
     }
-    $remoteDir = "RSDTARGET:$($remoteDirLocal.Substring(2))"        # C:\Windows\... -> RSDTARGET:\Windows\...
+    $remoteDir = "RSDTARGET:$($remoteDirLocal.Substring(2))"        # C:\ProgramData\... -> RSDTARGET:\ProgramData\...
+
+    # A pasta e criada NA MAQUINA, pela sessao WinRM (como administrador), ja com a ACL final;
+    # pelo C$ ela herdaria a ACL do ProgramData, onde usuarios comuns criam pastas. Base que
+    # nao passa na conferencia (dono, heranca, permissoes, juncao): nada e copiado nem executado.
+    try {
+      $null = Invoke-Command -Session $session -ScriptBlock ${function:Initialize-RsdTempDir} -ArgumentList $RemoteBaseDir, $in.targetId
+    } catch {
+      $msg = Get-InnermostMessage $_
+      if ($msg -like 'Pasta tempor*insegura*') { throw [DeployFailure]::new('copy', 'unsafe-temp-dir', $msg) }
+      throw [DeployFailure]::new('copy', 'temp-dir-failed', "Não foi possível preparar a pasta temporária em ${computer}: $msg")
+    }
+    $remoteDirCreated = $true
     # "1,9 MB" (vírgula decimal): a mensagem vai para a tela em português.
     $sizeMb = ((Get-Item -LiteralPath $in.installerPath).Length / 1MB).ToString('0.0', [Globalization.CultureInfo]'pt-BR')
     Write-Log 'INFO' 'copy' "Copiando o instalador ($sizeMb MB) para $remoteFileLocal."
     try {
-      $null = New-Item -ItemType Directory -Path $remoteDir -Force
-      $remoteDirCreated = $true
       Copy-Item -LiteralPath $in.installerPath -Destination "$remoteDir\$fileName"
     } catch {
       throw [DeployFailure]::new('copy', 'copy-failed', "Falha ao copiar o instalador para ${computer}: $(Get-InnermostMessage $_)")

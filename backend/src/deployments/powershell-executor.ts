@@ -47,6 +47,10 @@ export type DeployFailureReason =
   | 'session'
   | 'smb-failed'
   | 'copy-failed'
+  // Pasta temporária na máquina (C:\ProgramData\RSD): insegura (dono, herança, permissões,
+  // junção) ou não foi possível criá-la. Nada é copiado nem executado.
+  | 'unsafe-temp-dir'
+  | 'temp-dir-failed'
   | 'hash-mismatch'
   | 'install-timeout'
   | 'uninstall-timeout'

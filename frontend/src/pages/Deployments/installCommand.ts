@@ -5,7 +5,7 @@ import type { Software } from '../../types/software';
 // os argumentos como itens do -ArgumentList (nunca como linha de comando montada).
 
 /** Pasta temporária criada em cada máquina; <alvo> é o id da máquina na implantação. */
-export const REMOTE_DIR = 'C:\\Windows\\Temp\\rsd\\<alvo>';
+export const REMOTE_DIR = 'C:\\ProgramData\\RSD\\<alvo>';
 
 export function installerPlaceholder(software: Pick<Software, 'installType'>): string {
   return `${REMOTE_DIR}\\<instalador>.${software.installType.toLowerCase()}`;
