@@ -1,5 +1,5 @@
 import { DeploymentStatus as S, LogLevel } from '@prisma/client';
-import { aggregateDeploymentStatus, interpretExitCode, interpretResult } from './deployment-outcome';
+import { aggregateDeploymentStatus, displayStatus, interpretExitCode, interpretResult } from './deployment-outcome';
 
 describe('interpretExitCode', () => {
   it.each(['MSI', 'EXE'] as const)('0 é sucesso (%s)', (type) => {
@@ -70,6 +70,21 @@ describe('interpretResult', () => {
     expect(
       interpretResult({ ok: false, phase: 'connect', reason: 'unreachable', message: 'não respondeu' }, 'MSI'),
     ).toEqual({ status: S.FAILED, level: LogLevel.ERROR, message: 'não respondeu', exitCode: null });
+  });
+});
+
+describe('displayStatus (Parcial calculado, sem status novo no banco)', () => {
+  const counts = (succeeded: number, failed: number) => ({ succeeded, failed });
+  it.each([
+    ['FAILED', counts(1, 2), 'PARTIAL'],
+    ['FAILED', counts(3, 1), 'PARTIAL'],
+    ['FAILED', counts(0, 3), 'FAILED'],
+    ['SUCCEEDED', counts(3, 0), 'SUCCEEDED'],
+    ['CANCELLED', counts(1, 0), 'CANCELLED'],
+    ['RUNNING', counts(1, 1), 'RUNNING'],
+    ['PENDING', counts(0, 0), 'PENDING'],
+  ] as const)('%s com %o → %s', (status, c, expected) => {
+    expect(displayStatus(status as never, c)).toBe(expected);
   });
 });
 

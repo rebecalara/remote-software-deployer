@@ -25,7 +25,7 @@ function setup(overrides: { summary?: Record<string, unknown>; available?: boole
       runningTargets: 2,
       pendingTargets: 3,
       windowHours: 24,
-      finishedInWindow: { succeeded: 9, failed: 1, cancelled: 0 },
+      finishedInWindow: { succeeded: 7, partial: 2, failed: 1, cancelled: 0 },
       ...overrides.summary,
     }),
   };
@@ -45,7 +45,8 @@ describe('DashboardService.overview', () => {
 
     expect(view.machines).toEqual({ total: 16, seenInLastSync: 15, lastSyncAt: SYNC.toISOString() });
     expect(prisma.machine.count).toHaveBeenCalledWith({ where: { lastSync: SYNC } });
-    expect(view.deployments).toMatchObject({ activeDeployments: 1, pendingTargets: 3, failureRate: 0.1 });
+    // 10 encerradas (cancelada não entra): 7 concluídas, 2 parciais, 1 falhou.
+    expect(view.deployments).toMatchObject({ activeDeployments: 1, pendingTargets: 3, failureRate: 0.1, successRate: 0.7 });
     expect(view.system).toEqual({
       database: { ok: true, detail: null, reason: null },
       ldap: { ok: true, detail: null, reason: null },
@@ -56,8 +57,10 @@ describe('DashboardService.overview', () => {
   });
 
   it('sem implantação encerrada na janela, taxa de falha nula (não 0%)', async () => {
-    const { service } = setup({ summary: { finishedInWindow: { succeeded: 0, failed: 0, cancelled: 2 } } });
-    expect((await service.overview()).deployments.failureRate).toBeNull();
+    const { service } = setup({ summary: { finishedInWindow: { succeeded: 0, partial: 0, failed: 0, cancelled: 2 } } });
+    const { deployments } = await service.overview();
+    expect(deployments.failureRate).toBeNull();
+    expect(deployments.successRate).toBeNull();
   });
 
   it('nunca sincronizado: nenhuma máquina presente, sem data', async () => {
@@ -140,7 +143,7 @@ describe('DashboardService.overview', () => {
         by: 'testuser',
         deploymentId: 'd1',
         action: 'INSTALL',
-        status: 'FAILED',
+        status: 'PARTIAL',
         succeeded: 1,
         failed: 1,
         total: 2,

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DeploymentAction, DeploymentStatus } from '@prisma/client';
+import { DeploymentDisplayStatus, displayStatus } from '../deployments/deployment-outcome';
 import { DeploymentsService, type DeploymentOverview } from '../deployments/deployments.service';
 import { PowerShellExecutor } from '../deployments/powershell-executor';
 import { LdapAuthenticationError, LdapService } from '../ldap/ldap.service';
@@ -21,7 +22,8 @@ export interface ActivityItem {
   deploymentId?: string;
   /** deployment: instalação ou desinstalação. */
   action?: DeploymentAction;
-  status?: DeploymentStatus;
+  /** PARTIAL = alguma máquina concluiu e alguma falhou (calculado). */
+  status?: DeploymentDisplayStatus;
   succeeded?: number;
   failed?: number;
   total?: number;
@@ -56,8 +58,13 @@ export interface DashboardView {
     checkedAt: string | null;
   };
   deployments: DeploymentOverview & {
-    /** Falhas / (concluídas + falhas) na janela; null sem nenhuma encerrada. */
+    /**
+     * Sobre as encerradas na janela, sem as canceladas (concluídas + parciais + falhas);
+     * null sem nenhuma. Falha = nenhuma máquina concluiu; parcial não conta nem como
+     * sucesso nem como falha.
+     */
     failureRate: number | null;
+    successRate: number | null;
   };
   activity: ActivityItem[];
   system: {
@@ -89,12 +96,17 @@ export class DashboardService {
       this.activity(),
       this.checkLdap(now.getTime()),
     ]);
-    const { succeeded, failed } = summary.finishedInWindow;
+    const { succeeded, partial, failed } = summary.finishedInWindow;
+    const ended = succeeded + partial + failed;
     const reachability = await this.reachabilityCounts(machines.lastSyncAt, machines.seenInLastSync);
     return {
       machines,
       reachability,
-      deployments: { ...summary, failureRate: succeeded + failed > 0 ? failed / (succeeded + failed) : null },
+      deployments: {
+        ...summary,
+        failureRate: ended > 0 ? failed / ended : null,
+        successRate: ended > 0 ? succeeded / ended : null,
+      },
       activity,
       system: {
         database,
@@ -187,7 +199,9 @@ export class DashboardService {
         by: d.user.displayName || d.user.username,
         deploymentId: d.id,
         action: d.action,
-        status: d.status,
+        status: displayStatus(d.status, {
+          succeeded: d.targets.filter((t) => t.status === DeploymentStatus.SUCCEEDED).length,
+        }),
         succeeded: d.targets.filter((t) => t.status === DeploymentStatus.SUCCEEDED).length,
         failed: d.targets.filter((t) => t.status === DeploymentStatus.FAILED).length,
         total: d.targets.length,

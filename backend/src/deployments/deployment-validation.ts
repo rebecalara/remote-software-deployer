@@ -142,7 +142,8 @@ export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 export const MAX_MACHINE_FILTER_LENGTH = 64;
 
-const DEPLOYMENT_STATUSES = ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
+// PARTIAL é calculado (FAILED com alguma máquina concluída), não existe no banco.
+const DEPLOYMENT_STATUSES = ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'PARTIAL'] as const;
 type DeploymentStatusValue = (typeof DEPLOYMENT_STATUSES)[number];
 
 export interface DeploymentListQuery {

@@ -66,13 +66,27 @@ describe('DeploymentsService.list e get', () => {
     expect(item).toMatchObject({ id: DEP, startedAt: at(1).toISOString(), finishedAt: null });
   });
 
+  it('status na resposta: FAILED com alguma máquina concluída vira PARTIAL; sem nenhuma, FAILED', async () => {
+    const { prisma, service } = setup();
+    prisma.deployment.count.mockResolvedValue(2);
+    prisma.deployment.findMany.mockResolvedValue([
+      depRow([{ status: 'SUCCEEDED' }, { status: 'FAILED' }, { status: 'FAILED' }], { id: 'a', status: 'FAILED', finishedAt: at(9) }),
+      depRow([{ status: 'FAILED' }, { status: 'CANCELLED' }], { id: 'b', status: 'FAILED', finishedAt: at(9) }),
+    ]);
+    const page = await service.list(parseDeploymentListQuery({}), ME);
+    expect(page.items.map((i) => [i.id, i.status])).toEqual([
+      ['a', 'PARTIAL'],
+      ['b', 'FAILED'],
+    ]);
+  });
+
   it('"minhas": página e total filtrados pelo usuário recebido (o do token)', async () => {
     const { prisma, service } = setup();
     prisma.deployment.count.mockResolvedValue(0);
     prisma.deployment.findMany.mockResolvedValue([]);
-    await service.list(parseDeploymentListQuery({ mine: 'true', status: 'FAILED' }), ME);
-    expect(prisma.deployment.count).toHaveBeenCalledWith({ where: { status: 'FAILED', userId: ME } });
-    expect(prisma.deployment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: 'FAILED', userId: ME } }));
+    await service.list(parseDeploymentListQuery({ mine: 'true', status: 'SUCCEEDED' }), ME);
+    expect(prisma.deployment.count).toHaveBeenCalledWith({ where: { status: 'SUCCEEDED', userId: ME } });
+    expect(prisma.deployment.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: 'SUCCEEDED', userId: ME } }));
   });
 
   it('detalhe traz cada máquina com o último passo registrado', async () => {
@@ -245,11 +259,33 @@ describe('deploymentListWhere (filtros do Histórico)', () => {
     );
     expect(where).toEqual({
       status: 'FAILED',
+      AND: [{ targets: { none: { status: 'SUCCEEDED', deployment: { is: { status: 'FAILED' } } } } }],
       softwareId: SW_ID,
       createdAt: { gte: new Date('2026-11-01T03:00:00.000Z'), lt: new Date('2026-11-15T03:00:00.000Z') },
       targets: { some: { machine: { hostname: { contains: 'ws-adm', mode: 'insensitive' } } } },
       userId: ME,
     });
+  });
+
+  it('"Falhou" = nenhuma máquina concluiu; "Parcial" = FAILED com alguma concluída', () => {
+    // A subconsulta do "nenhuma concluída" fica restrita às implantações FAILED: sem isso o
+    // Prisma gera NOT IN sobre TODOS os alvos concluídos, e o Postgres passa a conferir linha a
+    // linha (medido: > 20 s com 100 mil implantações; 117 ms com a restrição).
+    expect(deploymentListWhere(parseDeploymentListQuery({ status: 'FAILED' }), ME)).toEqual({
+      status: 'FAILED',
+      AND: [{ targets: { none: { status: 'SUCCEEDED', deployment: { is: { status: 'FAILED' } } } } }],
+    });
+    expect(deploymentListWhere(parseDeploymentListQuery({ status: 'PARTIAL' }), ME)).toEqual({
+      status: 'FAILED',
+      AND: [{ targets: { some: { status: 'SUCCEEDED' } } }],
+    });
+    // A condição das máquinas não apaga a do nome da máquina (as duas usam "targets").
+    expect(deploymentListWhere(parseDeploymentListQuery({ status: 'PARTIAL', machine: 'ws' }), ME)).toEqual({
+      status: 'FAILED',
+      AND: [{ targets: { some: { status: 'SUCCEEDED' } } }],
+      targets: { some: { machine: { hostname: { contains: 'ws', mode: 'insensitive' } } } },
+    });
+    expect(deploymentListWhere(parseDeploymentListQuery({ status: 'SUCCEEDED' }), ME)).toEqual({ status: 'SUCCEEDED' });
   });
 
   it('ação: instalação ou desinstalação', () => {

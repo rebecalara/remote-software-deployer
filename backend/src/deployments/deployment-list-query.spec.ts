@@ -53,6 +53,11 @@ describe('parseDeploymentListQuery', () => {
     });
   });
 
+  it('status PARTIAL (calculado) é aceito no filtro', () => {
+    expect(parseDeploymentListQuery({ status: 'PARTIAL' }).status).toBe('PARTIAL');
+    expect(() => parseDeploymentListQuery({ status: 'PARCIAL' })).toThrow();
+  });
+
   it('aceita todos os filtros válidos', () => {
     expect(
       parseDeploymentListQuery({

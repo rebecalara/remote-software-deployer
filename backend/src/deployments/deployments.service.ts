@@ -10,6 +10,7 @@ import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
 import { SoftwareService } from '../software/software.service';
+import { DeploymentDisplayStatus, PARTIAL, displayStatus } from './deployment-outcome';
 import { DeploymentRunner } from './deployment-runner';
 import { DeploymentCreateInput, DeploymentListQuery, OUTSIDE_CATALOG } from './deployment-validation';
 import { InventoryItem, PowerShellExecutor } from './powershell-executor';
@@ -34,7 +35,8 @@ export interface DeploymentOverview {
   pendingTargets: number;
   windowHours: number;
   /** Implantações encerradas na janela, por status final. */
-  finishedInWindow: { succeeded: number; failed: number; cancelled: number };
+  /** failed = nenhuma máquina concluiu; partial = alguma concluiu e alguma falhou. */
+  finishedInWindow: { succeeded: number; partial: number; failed: number; cancelled: number };
 }
 
 export interface DeploymentLogView {
@@ -81,7 +83,8 @@ interface DeploymentBase {
   name: string;
   /** Instalação ou desinstalação. */
   action: DeploymentAction;
-  status: DeploymentStatus;
+  /** Calculado: PARTIAL = FAILED com alguma máquina concluída (ver `displayStatus`). */
+  status: DeploymentDisplayStatus;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -384,7 +387,7 @@ export class DeploymentsService {
    */
   async summary(now: Date = new Date()): Promise<DeploymentOverview> {
     const since = new Date(now.getTime() - SUMMARY_WINDOW_HOURS * 3600 * 1000);
-    const [active, targetGroups, finishedGroups] = await Promise.all([
+    const [active, targetGroups, finishedGroups, partial] = await Promise.all([
       this.prisma.deployment.count({ where: { finishedAt: null } }),
       this.prisma.deploymentTarget.groupBy({
         by: ['status'],
@@ -396,6 +399,9 @@ export class DeploymentsService {
         where: { finishedAt: { gte: since } },
         _count: { _all: true },
       }),
+      this.prisma.deployment.count({
+        where: { finishedAt: { gte: since }, status: DeploymentStatus.FAILED, targets: PARTIAL_TARGETS },
+      }),
     ]);
     const targets = (s: DeploymentStatus) => targetGroups.find((g) => g.status === s)?._count._all ?? 0;
     const finished = (s: DeploymentStatus) => finishedGroups.find((g) => g.status === s)?._count._all ?? 0;
@@ -406,7 +412,8 @@ export class DeploymentsService {
       windowHours: SUMMARY_WINDOW_HOURS,
       finishedInWindow: {
         succeeded: finished(DeploymentStatus.SUCCEEDED),
-        failed: finished(DeploymentStatus.FAILED),
+        partial,
+        failed: finished(DeploymentStatus.FAILED) - partial,
         cancelled: finished(DeploymentStatus.CANCELLED),
       },
     };
@@ -477,6 +484,9 @@ export class DeploymentsService {
   }
 }
 
+/** Máquinas de uma implantação "Parcial": pelo menos uma concluída (com status FAILED). */
+const PARTIAL_TARGETS = { some: { status: DeploymentStatus.SUCCEEDED } } satisfies Prisma.DeploymentTargetListRelationFilter;
+
 function countStatuses(statuses: DeploymentStatus[]): DeploymentCounts {
   const count = (s: DeploymentStatus) => statuses.filter((x) => x === s).length;
   return {
@@ -494,11 +504,12 @@ function toLogView(l: { timestamp: Date; level: LogLevel; message: string }): De
 }
 
 function toBase(d: DeploymentSummaryRow | DeploymentWithRelations): DeploymentBase {
+  const counts = countStatuses(d.targets.map((t) => t.status));
   return {
     id: d.id,
     name: d.name,
     action: d.action,
-    status: d.status,
+    status: displayStatus(d.status, counts),
     createdAt: d.createdAt.toISOString(),
     startedAt: d.startedAt?.toISOString() ?? null,
     finishedAt: d.finishedAt?.toISOString() ?? null,
@@ -509,7 +520,7 @@ function toBase(d: DeploymentSummaryRow | DeploymentWithRelations): DeploymentBa
         : null,
     vendorCommand: d.uninstallCommand ?? null,
     requestedBy: d.user,
-    counts: countStatuses(d.targets.map((t) => t.status)),
+    counts,
   };
 }
 
@@ -544,7 +555,23 @@ export function deploymentListWhere(query: DeploymentListQuery, requesterId: str
     where.finishedAt = { not: null, ...(query.finishedFrom ? { gte: query.finishedFrom } : {}) };
   }
   if (query.action) where.action = query.action;
-  if (query.status) where.status = query.status;
+  // "Falhou" e "Parcial" são o mesmo FAILED no banco, separados pelas máquinas: com alguma
+  // concluída é Parcial. Em AND, para não apagar o filtro por nome de máquina (targets).
+  if (query.status === PARTIAL) {
+    where.status = DeploymentStatus.FAILED;
+    where.AND = [{ targets: PARTIAL_TARGETS }];
+  } else if (query.status === DeploymentStatus.FAILED) {
+    // "Nenhuma concluída": o Prisma gera NOT IN (subconsulta), que o Postgres não transforma
+    // em anti-join — com a subconsulta sobre TODOS os alvos concluídos, ele passa a conferir
+    // linha a linha (medido: > 20 s com 100 mil implantações). Restrita aos alvos de
+    // implantações FAILED (o mesmo resultado), a subconsulta fica pequena.
+    where.status = DeploymentStatus.FAILED;
+    where.AND = [
+      { targets: { none: { status: DeploymentStatus.SUCCEEDED, deployment: { is: { status: DeploymentStatus.FAILED } } } } },
+    ];
+  } else if (query.status) {
+    where.status = query.status;
+  }
   if (query.softwareId) where.softwareId = query.softwareId === OUTSIDE_CATALOG ? null : query.softwareId;
   if (query.from || query.to) {
     where.createdAt = { ...(query.from ? { gte: query.from } : {}), ...(query.to ? { lt: query.to } : {}) };

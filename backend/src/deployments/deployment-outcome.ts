@@ -156,13 +156,24 @@ export const FINAL_STATUSES: readonly DeploymentStatus[] = [
 ];
 
 /**
- * Status da implantação a partir dos alvos. null = ainda há alvo pendente ou em
- * execução. Sem status PARTIAL (decisão aprovada): basta uma falha para FAILED; a
- * tela mostra a contagem. Sem falha, qualquer cancelado deixa CANCELLED.
+ * Status da implantação a partir dos alvos, como fica no BANCO. null = ainda há alvo
+ * pendente ou em execução. Basta uma falha para FAILED; sem falha, qualquer cancelado
+ * deixa CANCELLED. "Parcial" não é gravado: é calculado na leitura (`displayStatus`).
  */
 export function aggregateDeploymentStatus(targetStatuses: DeploymentStatus[]): DeploymentStatus | null {
   if (targetStatuses.some((s) => !FINAL_STATUSES.includes(s))) return null;
   if (targetStatuses.includes(DeploymentStatus.FAILED)) return DeploymentStatus.FAILED;
   if (targetStatuses.includes(DeploymentStatus.CANCELLED)) return DeploymentStatus.CANCELLED;
   return DeploymentStatus.SUCCEEDED;
+}
+
+/**
+ * Status mostrado (API e telas): o do banco, mais PARTIAL — calculado, sem status novo no
+ * enum. PARTIAL = FAILED em que pelo menos uma máquina concluiu; FAILED = nenhuma concluiu.
+ */
+export type DeploymentDisplayStatus = DeploymentStatus | 'PARTIAL';
+export const PARTIAL = 'PARTIAL' as const;
+
+export function displayStatus(status: DeploymentStatus, counts: { succeeded: number }): DeploymentDisplayStatus {
+  return status === DeploymentStatus.FAILED && counts.succeeded > 0 ? PARTIAL : status;
 }
