@@ -150,6 +150,27 @@ describe('AuthService', () => {
 
     expect(ldapService.bind).not.toHaveBeenCalled();
   });
+  it('usuário sem diferenciar maiúsculas: "Rebeca" e " REBECA " entram como "rebeca"', async () => {
+    ldapService.bind.mockResolvedValue(undefined);
+    prisma.user.findUnique.mockResolvedValue({ ...fakeUser, username: 'rebeca' });
+
+    await service.login('Rebeca', 'senha-correta');
+    await service.login(' REBECA ', 'senha-correta');
+
+    expect(ldapService.bind.mock.calls.map((c) => c[0])).toEqual(['rebeca', 'rebeca']);
+    expect(prisma.user.findUnique.mock.calls.map((c) => c[0])).toEqual([
+      { where: { username: 'rebeca' } },
+      { where: { username: 'rebeca' } },
+    ]);
+  });
+
+  it('a senha NÃO é alterada (só o usuário vai para minúsculas)', async () => {
+    ldapService.bind.mockResolvedValue(undefined);
+    prisma.user.findUnique.mockResolvedValue(fakeUser);
+    await service.login('LRebeca', 'Senha-Com-MAIUSCULAS');
+    expect(ldapService.bind).toHaveBeenCalledWith('lrebeca', 'Senha-Com-MAIUSCULAS');
+  });
+
   it('rejeita username contendo apenas espaços', async () => {
     await expect(
       service.login('   ', 'senha123'),

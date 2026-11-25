@@ -54,6 +54,8 @@ enum LogLevel {
 
 model User {
   id          String   @id @default(uuid())
+  /// Sempre em minúsculas: CHECK "User_username_lowercase_check" (migração
+  /// 20261125150000_user_username_lowercase, escrita à mão — o Prisma não declara CHECK).
   username    String   @unique
   displayName String
   email       String?

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as ldap from 'ldapjs';
+import { isAllowedLdapUsername, ldapUrlWarning } from './ldap-security';
 
 export class LdapAuthenticationError extends Error {}
 
@@ -25,6 +26,12 @@ export interface LdapEntry {
 export class LdapService {
   private readonly logger = new Logger(LdapService.name);
 
+  constructor() {
+    // Uma vez, na subida: ldap:// para fora da máquina manda as senhas sem criptografia.
+    const warning = ldapUrlWarning(process.env.LDAP_URL);
+    if (warning) this.logger.warn(warning);
+  }
+
   buildBindDn(username: string): string {
     const template = process.env.LDAP_BIND_DN_TEMPLATE;
     if (!template) {
@@ -34,6 +41,10 @@ export class LdapService {
   }
 
   async bind(username: string, password: string): Promise<void> {
+    // Fora da regra, nada vai ao LDAP: o mesmo erro de credencial inválida (mensagem genérica).
+    if (!isAllowedLdapUsername(username, process.env.LDAP_BIND_DN_TEMPLATE ?? '')) {
+      throw new LdapAuthenticationError('Nome de usuário com caracteres não permitidos.');
+    }
     const bindDn = this.buildBindDn(username);
     const client = this.createClient();
 
@@ -88,6 +99,9 @@ export class LdapService {
       url,
       connectTimeout: CONNECT_TIMEOUT_MS,
       timeout: CONNECT_TIMEOUT_MS,
+      // Só vale para ldaps://. O certificado é sempre verificado (a CA interna entra por
+      // NODE_EXTRA_CA_CERTS); TLS 1.0/1.1 recusados.
+      tlsOptions: { minVersion: 'TLSv1.2' },
     });
   }
 

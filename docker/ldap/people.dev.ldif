@@ -3,8 +3,8 @@
 #
 # O papel (ADMIN / OPERATOR / VIEWER) NÃO vem do LDAP: vem da tabela User do banco do
 # sistema, que precisa ter uma linha com o mesmo username. No banco local:
-#   INSERT INTO "User" (id, username, role)
-#   VALUES (gen_random_uuid(), 'testuser', 'ADMIN') ON CONFLICT (username) DO NOTHING;
+#   INSERT INTO "User" (id, username, "displayName", role)
+#   VALUES (gen_random_uuid(), 'testuser', '', 'ADMIN') ON CONFLICT (username) DO NOTHING;
 #   INSERT INTO "User" (id, username, "displayName", role)
 #   VALUES (gen_random_uuid(), 'viewer', 'Usuário Visualizador', 'VIEWER') ON CONFLICT (username) DO NOTHING;
 

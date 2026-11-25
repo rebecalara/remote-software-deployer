@@ -31,7 +31,9 @@ export class AuthService {
       );
     }
 
-    const normalizedUsername = username.trim();
+    // Usuário sem diferenciar maiúsculas: "Rebeca" = "rebeca" no LDAP (que já não diferencia)
+    // e na tabela User (gravada sempre em minúsculas). A senha não muda.
+    const normalizedUsername = username.trim().toLowerCase();
 
     if (!normalizedUsername || password.length === 0) {
       throw new BadRequestException(
@@ -47,7 +49,7 @@ export class AuthService {
 
     if (!user) {
       this.logger.warn(
-        `Bind LDAP ok para "${normalizedUsername}", mas não há User cadastrado no sistema.`,
+        `Bind LDAP ok para ${JSON.stringify(normalizedUsername)}, mas não há User cadastrado no sistema.`,
       );
       throw new UnauthorizedException(GENERIC_AUTH_ERROR);
     }
@@ -76,16 +78,17 @@ export class AuthService {
     } catch (err) {
       if (err instanceof LdapConnectionError) {
         this.logger.error(
-          `Falha de conexão com o LDAP ao autenticar "${username}": ${err.message}`,
+          `Falha de conexão com o LDAP ao autenticar ${JSON.stringify(username)}: ${err.message}`,
         );
         // Não é erro de credencial: a pessoa não errou nada, e o 401 a faria tentar de
         // novo (e gastar o limite de tentativas) com a senha certa.
         throw new ServiceUnavailableException(AUTH_UNAVAILABLE_ERROR);
       } else if (err instanceof LdapAuthenticationError) {
-        this.logger.warn(`Bind LDAP rejeitado para "${username}": ${err.message}`);
+        // JSON.stringify: um nome com quebra de linha não forja linhas no log.
+        this.logger.warn(`Bind LDAP rejeitado para ${JSON.stringify(username)}: ${err.message}`);
       } else {
         this.logger.error(
-          `Erro inesperado ao autenticar "${username}": ${(err as Error).message}`,
+          `Erro inesperado ao autenticar ${JSON.stringify(username)}: ${(err as Error).message}`,
         );
       }
 
