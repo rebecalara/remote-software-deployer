@@ -15,20 +15,24 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
-import { MAX_TARGETS_PER_DEPLOYMENT } from '../deployments/deployment-validation';
+import { DEFAULT_MAX_MACHINES, parseMaxMachines } from '../deployments/deployment-validation';
 import { InventoryService, InventoryState, InventorySummary, InventoryView } from './inventory.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Corpo de POST /machines/inventory-summary: de 1 a 50 ids de máquina, sem repetição. */
-export function parseSummaryBody(body: unknown): string[] {
+/**
+ * Corpo de POST /machines/inventory-summary: de 1 ao limite de máquinas por implantação
+ * (DEPLOYMENT_MAX_MACHINES, padrão 50) ids de máquina, sem repetição — o passo Desinstalar
+ * pede o resumo das mesmas máquinas que vão na implantação.
+ */
+export function parseSummaryBody(body: unknown, maxMachines = DEFAULT_MAX_MACHINES): string[] {
   const ids = (body as { machineIds?: unknown } | null)?.machineIds;
   const fail = (message: string) =>
     new BadRequestException({ statusCode: 400, error: 'Bad Request', message, field: 'machineIds' });
   if (!Array.isArray(ids) || ids.length === 0) throw fail('Selecione ao menos uma máquina.');
   if (ids.some((id) => typeof id !== 'string' || !UUID.test(id))) throw fail('A lista de máquinas contém um identificador inválido.');
   const unique = [...new Set((ids as string[]).map((id) => id.toLowerCase()))];
-  if (unique.length > MAX_TARGETS_PER_DEPLOYMENT) throw fail(`Selecione no máximo ${MAX_TARGETS_PER_DEPLOYMENT} máquinas.`);
+  if (unique.length > maxMachines) throw fail(`Selecione no máximo ${maxMachines} máquinas.`);
   return unique;
 }
 
@@ -40,6 +44,9 @@ export const INVENTORY_COLLECT_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.OPE
 @Controller('machines')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class InventoryController {
+  /** Mesmo limite do POST /deployments (o aviso de valor inválido sai do DeploymentsController). */
+  private readonly maxMachines = parseMaxMachines(process.env.DEPLOYMENT_MAX_MACHINES);
+
   constructor(private readonly inventory: InventoryService) {}
 
   /**
@@ -51,7 +58,7 @@ export class InventoryController {
   @HttpCode(HttpStatus.OK)
   @Roles(...INVENTORY_COLLECT_ROLES)
   summary(@Body() body: unknown): Promise<InventorySummary> {
-    return this.inventory.summary(parseSummaryBody(body));
+    return this.inventory.summary(parseSummaryBody(body, this.maxMachines));
   }
 
   /** A última consulta guardada (ou null) e se a consulta ao vivo está disponível. Todos os perfis. */

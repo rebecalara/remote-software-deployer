@@ -3,8 +3,33 @@ import { BadRequestException } from '@nestjs/common';
 // Validação do corpo de POST /deployments (função pura, sem banco). O 400 leva o
 // campo com problema (`field`), como no catálogo, para a tela apontar onde errou.
 
-export const MAX_TARGETS_PER_DEPLOYMENT = 50;
+/** Máquinas por implantação: padrão de DEPLOYMENT_MAX_MACHINES. */
+export const DEFAULT_MAX_MACHINES = 50;
+/**
+ * Teto de DEPLOYMENT_MAX_MACHINES. Acima disso, um pedido só vira uma fila longa demais para
+ * acompanhar numa tela (e a lista do resumo do inventário cresce junto).
+ */
+export const MAX_MACHINES_CEILING = 500;
 export const MAX_NAME_LENGTH = 120;
+
+/**
+ * DEPLOYMENT_MAX_MACHINES do .env: inteiro de 1 a 500, só dígitos. Ausente ou vazio → 50;
+ * inválido → 50 com aviso; acima do teto → 500 com aviso (mesmo padrão das outras variáveis).
+ */
+export function parseMaxMachines(raw: string | undefined, warn?: (msg: string) => void): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_MACHINES;
+  const text = raw.trim();
+  const value = /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    warn?.(`DEPLOYMENT_MAX_MACHINES inválido ("${raw}"); usando ${DEFAULT_MAX_MACHINES}.`);
+    return DEFAULT_MAX_MACHINES;
+  }
+  if (value > MAX_MACHINES_CEILING) {
+    warn?.(`DEPLOYMENT_MAX_MACHINES=${value} acima do teto; usando ${MAX_MACHINES_CEILING}.`);
+    return MAX_MACHINES_CEILING;
+  }
+  return value;
+}
 
 export type DeploymentActionValue = 'INSTALL' | 'UNINSTALL';
 
@@ -39,7 +64,7 @@ const PRODUCT_CODE = /^\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F
 /** Filtro do Histórico: implantações de produtos fora do catálogo (softwareId nulo). */
 export const OUTSIDE_CATALOG = 'none';
 
-export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
+export function validateDeploymentCreate(body: unknown, maxMachines = DEFAULT_MAX_MACHINES): DeploymentCreateInput {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw invalid('body', 'O corpo da requisição deve ser um objeto JSON.');
   }
@@ -89,8 +114,8 @@ export function validateDeploymentCreate(body: unknown): DeploymentCreateInput {
     throw invalid('machineIds', 'A lista de máquinas contém um identificador inválido.');
   }
   const machineIds = [...new Set((data.machineIds as string[]).map((id) => id.toLowerCase()))];
-  if (machineIds.length > MAX_TARGETS_PER_DEPLOYMENT) {
-    throw invalid('machineIds', `Selecione no máximo ${MAX_TARGETS_PER_DEPLOYMENT} máquinas por implantação.`);
+  if (machineIds.length > maxMachines) {
+    throw invalid('machineIds', `Selecione no máximo ${maxMachines} máquinas por implantação.`);
   }
 
   let name: string | null = null;

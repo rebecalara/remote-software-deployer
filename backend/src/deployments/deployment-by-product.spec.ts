@@ -63,6 +63,9 @@ describe('DeploymentsService.create — desinstalação pelo inventário', () =>
 
   function setup(options: { catalog?: Record<string, unknown> | null } = {}) {
     const prisma = {
+      deploymentTarget: { findMany: jest.fn().mockResolvedValue([]) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $transaction: jest.fn(),
       machine: {
         findMany: jest.fn().mockResolvedValue([
           { id: M1, hostname: 'RSD-ALVO-01', lastSync: SYNC },
@@ -96,6 +99,7 @@ describe('DeploymentsService.create — desinstalação pelo inventário', () =>
         })),
       },
     };
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     const service = new DeploymentsService(
       prisma as never,
       { isAvailable: true, unavailableReason: null } as never,

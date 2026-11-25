@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -15,7 +16,7 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
-import { parseDeploymentListQuery, validateDeploymentCreate } from './deployment-validation';
+import { parseDeploymentListQuery, parseMaxMachines, validateDeploymentCreate } from './deployment-validation';
 import {
   DeploymentLogView,
   DeploymentOverview,
@@ -31,6 +32,10 @@ export const DEPLOYMENT_WRITE_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.OPER
 @Controller('deployments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DeploymentsController {
+  private readonly logger = new Logger(DeploymentsController.name);
+  /** Máquinas por implantação (DEPLOYMENT_MAX_MACHINES, padrão 50), lido uma vez na subida. */
+  private readonly maxMachines = parseMaxMachines(process.env.DEPLOYMENT_MAX_MACHINES, (msg) => this.logger.warn(msg));
+
   constructor(private readonly deploymentsService: DeploymentsService) {}
 
   /**
@@ -59,6 +64,15 @@ export class DeploymentsController {
     return this.deploymentsService.summary();
   }
 
+  /**
+   * Limites que a tela precisa conhecer antes de enviar (hoje: máquinas por implantação).
+   * Leitura para qualquer usuário logado. Também ANTES de @Get(':id').
+   */
+  @Get('limits')
+  limits(): { maxMachines: number } {
+    return { maxMachines: this.maxMachines };
+  }
+
   /** Leitura para qualquer usuário logado. A tela de acompanhamento consulta esta rota. */
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string): Promise<DeploymentView> {
@@ -79,7 +93,7 @@ export class DeploymentsController {
   @HttpCode(HttpStatus.CREATED)
   @Roles(...DEPLOYMENT_WRITE_ROLES)
   create(@Body() body: unknown, @Req() req: AuthenticatedRequest): Promise<DeploymentView> {
-    return this.deploymentsService.create(validateDeploymentCreate(body), req.user!.sub);
+    return this.deploymentsService.create(validateDeploymentCreate(body, this.maxMachines), req.user!.sub);
   }
 
   /** Cancela só as máquinas pendentes; as em execução terminam normalmente. */

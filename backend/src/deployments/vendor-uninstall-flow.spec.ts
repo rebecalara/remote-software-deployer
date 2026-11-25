@@ -133,6 +133,9 @@ describe('DeploymentsService.create — programId', () => {
   afterAll(() => Logger.overrideLogger(['log', 'error', 'warn', 'debug', 'verbose']));
   function setup(items: unknown[] = [SEVEN]) {
     const prisma = {
+      deploymentTarget: { findMany: jest.fn().mockResolvedValue([]) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $transaction: jest.fn(),
       machine: {
         findMany: jest.fn().mockResolvedValue([{ id: M1, hostname: 'RSD-ALVO-01', lastSync: SYNC }]),
         aggregate: jest.fn().mockResolvedValue({ _max: { lastSync: SYNC } }),
@@ -146,6 +149,7 @@ describe('DeploymentsService.create — programId', () => {
         })),
       },
     };
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     const service = new DeploymentsService(prisma as never, { isAvailable: true, unavailableReason: null } as never, {} as never, { enqueue: jest.fn() } as never);
     const input = { action: 'UNINSTALL' as const, softwareId: null, productCode: null, programId: PID, machineIds: [M1], name: null };
     return { prisma, service, input };

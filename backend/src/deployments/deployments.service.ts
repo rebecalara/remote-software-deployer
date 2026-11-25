@@ -209,7 +209,55 @@ export class DeploymentsService {
     const name =
       input.name ?? `${uninstall ? 'Desinstalar ' : ''}${label} — ${count} ${count === 1 ? 'máquina' : 'máquinas'}`;
 
-    const created = await this.prisma.deployment.create({
+    // "A mesma implantação": mesma ação e o mesmo alvo — o software do catálogo (instalação),
+    // o ProductCode (desinstalação de MSI, pelo catálogo ou pelo inventário) ou a chave do
+    // programa no registro (desinstalação pelo comando do fabricante).
+    const sameDeployment: Prisma.DeploymentWhereInput = !uninstall
+      ? { action: input.action, softwareId: software!.id }
+      : product?.vendor
+        ? { action: input.action, uninstallKey: product.vendor.key, uninstallArch: product.vendor.arch }
+        : { action: input.action, productCode: product!.code };
+
+    // Checagem e criação juntas, sob uma trava do Postgres que só é solta no fim da transação:
+    // dois pedidos iguais ao mesmo tempo (clique duplo, duas abas) não passam os dois — o
+    // segundo espera o primeiro gravar e então o enxerga. Vale também com mais de uma
+    // instância do backend (a trava é do banco, não do processo). Sem mudança de schema.
+    const created = await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('rsd:deployments:create'))`;
+        const busy = await tx.deploymentTarget.findMany({
+          where: {
+            machineId: { in: input.machineIds },
+            status: { in: [DeploymentStatus.PENDING, DeploymentStatus.RUNNING] },
+            deployment: sameDeployment,
+          },
+          select: { machine: { select: { hostname: true } } },
+        });
+        if (busy.length > 0) {
+          const hosts = [...new Set(busy.map((t) => t.machine.hostname))].sort((a, b) => a.localeCompare(b));
+          throw new ConflictException(`Já existe uma implantação igual em andamento em: ${hosts.join(', ')}.`);
+        }
+        return this.createRecord(tx, input, userId, name, software, product);
+      },
+      // A espera pela trava conta no tempo da transação; criar é rápido, mas dá folga.
+      { maxWait: 10_000, timeout: 20_000 },
+    );
+
+    // Na ordem da seleção: o Prisma não garante a ordem dos alvos criados.
+    const targetByMachine = new Map(created.targets.map((t) => [t.machineId, t.id]));
+    this.runner.enqueue(input.machineIds.map((machineId) => ({ targetId: targetByMachine.get(machineId)!, machineId })));
+    return toDeploymentView(created);
+  }
+
+  private createRecord(
+    tx: Prisma.TransactionClient,
+    input: DeploymentCreateInput,
+    userId: string,
+    name: string,
+    software: Software | null,
+    product: ProductSnapshot | null,
+  ) {
+    return tx.deployment.create({
       data: {
         name,
         action: input.action,
@@ -225,11 +273,6 @@ export class DeploymentsService {
       },
       include: deploymentInclude,
     });
-
-    // Na ordem da seleção: o Prisma não garante a ordem dos alvos criados.
-    const targetByMachine = new Map(created.targets.map((t) => [t.machineId, t.id]));
-    this.runner.enqueue(input.machineIds.map((machineId) => ({ targetId: targetByMachine.get(machineId)!, machineId })));
-    return toDeploymentView(created);
   }
 
   /**

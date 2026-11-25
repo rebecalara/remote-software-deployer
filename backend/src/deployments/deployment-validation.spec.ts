@@ -1,5 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { MAX_TARGETS_PER_DEPLOYMENT, validateDeploymentCreate } from './deployment-validation';
+import {
+  DEFAULT_MAX_MACHINES,
+  MAX_MACHINES_CEILING,
+  parseMaxMachines,
+  validateDeploymentCreate,
+} from './deployment-validation';
 
 const SW = '11111111-1111-4111-8111-111111111111';
 const M1 = '22222222-2222-4222-8222-222222222222';
@@ -50,17 +55,68 @@ describe('validateDeploymentCreate', () => {
     expect(errorOf(body).field).toBe(field);
   });
 
-  it(`recusa mais de ${MAX_TARGETS_PER_DEPLOYMENT} máquinas (contando sem repetição)`, () => {
+  it(`recusa mais de ${DEFAULT_MAX_MACHINES} máquinas (contando sem repetição)`, () => {
     const ids = (n: number) =>
       Array.from({ length: n }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
-    expect(validateDeploymentCreate({ softwareId: SW, machineIds: ids(MAX_TARGETS_PER_DEPLOYMENT) }).machineIds)
-      .toHaveLength(MAX_TARGETS_PER_DEPLOYMENT);
-    expect(errorOf({ softwareId: SW, machineIds: ids(MAX_TARGETS_PER_DEPLOYMENT + 1) }).message).toBe(
-      `Selecione no máximo ${MAX_TARGETS_PER_DEPLOYMENT} máquinas por implantação.`,
+    expect(validateDeploymentCreate({ softwareId: SW, machineIds: ids(DEFAULT_MAX_MACHINES) }).machineIds)
+      .toHaveLength(DEFAULT_MAX_MACHINES);
+    expect(errorOf({ softwareId: SW, machineIds: ids(DEFAULT_MAX_MACHINES + 1) }).message).toBe(
+      `Selecione no máximo ${DEFAULT_MAX_MACHINES} máquinas por implantação.`,
     );
-    const repeated = [...ids(MAX_TARGETS_PER_DEPLOYMENT), ...ids(10)];
+    const repeated = [...ids(DEFAULT_MAX_MACHINES), ...ids(10)];
     expect(validateDeploymentCreate({ softwareId: SW, machineIds: repeated }).machineIds).toHaveLength(
-      MAX_TARGETS_PER_DEPLOYMENT,
+      DEFAULT_MAX_MACHINES,
     );
+  });
+
+  it('o limite vem de fora (DEPLOYMENT_MAX_MACHINES): com 5, recusa a sexta máquina', () => {
+    const ids = (n: number) =>
+      Array.from({ length: n }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    expect(validateDeploymentCreate({ softwareId: SW, machineIds: ids(5) }, 5).machineIds).toHaveLength(5);
+    let error: BadRequestException | undefined;
+    try {
+      validateDeploymentCreate({ softwareId: SW, machineIds: ids(6) }, 5);
+    } catch (err) {
+      error = err as BadRequestException;
+    }
+    expect(error?.getResponse()).toMatchObject({
+      message: 'Selecione no máximo 5 máquinas por implantação.',
+      field: 'machineIds',
+    });
+  });
+});
+
+describe('parseMaxMachines (DEPLOYMENT_MAX_MACHINES)', () => {
+  it('padrão 50; ausente ou vazio usa o padrão sem aviso', () => {
+    const warn = jest.fn();
+    expect(DEFAULT_MAX_MACHINES).toBe(50);
+    expect(parseMaxMachines(undefined, warn)).toBe(50);
+    expect(parseMaxMachines('  ', warn)).toBe(50);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['1', 1],
+    ['120', 120],
+    [' 200 ', 200],
+    [String(MAX_MACHINES_CEILING), MAX_MACHINES_CEILING],
+  ])('aceita %p → %p', (raw, expected) => {
+    const warn = jest.fn();
+    expect(parseMaxMachines(raw, warn)).toBe(expected);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['0', '-5', 'abc', '1.5', '1e2', '0x10', '+50', '50abc'])('valor inválido %p → padrão, com aviso', (raw) => {
+    const warn = jest.fn();
+    expect(parseMaxMachines(raw, warn)).toBe(50);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('DEPLOYMENT_MAX_MACHINES'));
+  });
+
+  it('acima do teto (500) → teto, com aviso', () => {
+    const warn = jest.fn();
+    expect(MAX_MACHINES_CEILING).toBe(500);
+    expect(parseMaxMachines('501', warn)).toBe(500);
+    expect(parseMaxMachines('100000', warn)).toBe(500);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });

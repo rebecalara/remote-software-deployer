@@ -151,6 +151,9 @@ describe('DeploymentsService.create — desinstalação', () => {
   const SYNC = new Date('2026-11-17T10:00:00Z');
   function setup(softwareOverrides: Record<string, unknown> = {}) {
     const prisma = {
+      deploymentTarget: { findMany: jest.fn().mockResolvedValue([]) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $transaction: jest.fn(),
       software: {
         findUnique: jest.fn().mockResolvedValue({
           id: SW,
@@ -182,6 +185,7 @@ describe('DeploymentsService.create — desinstalação', () => {
         })),
       },
     };
+    prisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn(prisma));
     const storage = { isAvailable: true, exists: jest.fn().mockResolvedValue(false) };
     const softwareService = { ensureMsiProductCode: jest.fn().mockResolvedValue(null) };
     const service = new DeploymentsService(
