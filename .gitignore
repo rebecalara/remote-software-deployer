@@ -28,3 +28,7 @@ dist-ssr
 # Exceção: dados FICTÍCIOS do OpenLDAP local (ver DECISIONS.md)
 !docker/ldap/*.ldif
 *.code-workspace
+
+# Relatórios de cobertura dos testes (npm run test:cov)
+backend/coverage/
+frontend/coverage/
