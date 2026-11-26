@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckIcon, CopyIcon } from './icons';
-import { Tooltip } from './Tooltip';
+import { Tooltip, TooltipTarget } from './Tooltip';
 
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 const ICON_BUTTON =
   'rounded-md p-1 text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500/50';
 
@@ -27,9 +26,9 @@ export function Sha256({ value }: { value: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       <Tooltip content={<span className="font-mono break-all">{value}</span>}>
-        <span tabIndex={0} className={`font-mono ${FOCUSABLE}`} data-testid="sha256">
+        <TooltipTarget className="font-mono" data-testid="sha256">
           {value.slice(0, 8)}…{value.slice(-8)}
-        </span>
+        </TooltipTarget>
       </Tooltip>
       <Tooltip content={copied ? 'Copiado' : 'Copiar SHA-256'} asLabel>
         <button type="button" onClick={copy} className={ICON_BUTTON} data-testid="copy-sha256">

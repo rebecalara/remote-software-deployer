@@ -27,13 +27,20 @@ export function ConfirmDialog(props: {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={props.onCancel}>
+    // Fundo escuro: só um atalho de mouse para cancelar (o teclado usa Esc e os botões), por
+    // isso role="presentation". Cancela só com o clique NO PRÓPRIO fundo, não dentro da janela.
+    <div
+      role="presentation"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onCancel();
+      }}
+    >
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
         aria-describedby="confirm-text"
-        onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
       >
         <h2 id="confirm-title" className="text-section font-semibold text-slate-900">

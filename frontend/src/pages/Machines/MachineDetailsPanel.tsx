@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { SidePanel } from '../../components/SidePanel';
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import { formatDateTime, formatRelative } from '../../utils/format';
 import type { Machine } from '../../types/machine';
 import { InventorySection } from './InventorySection';
@@ -17,7 +17,6 @@ interface MachineDetailsPanelProps {
 }
 
 /** Elementos sem foco próprio que ganham dica: recebem foco pelo teclado. */
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 
 // Só dado real: o que o AD fornece e, sob demanda, o software instalado lido da própria
 // máquina (RF08). IP e CPU/RAM/disco não vêm do AD — ver DECISIONS.md, recorte do mockup.
@@ -33,18 +32,15 @@ export function MachineDetailsPanel({ machine, now, onClose, canCollect, reachab
       <p className="font-mono text-section font-semibold break-all text-slate-900">{machine.hostname}</p>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         <Tooltip content={machineStatusHint(reachabilityOff ? 'UNKNOWN' : machine.status, machine.statusCheckedAt, reachabilityOff, now)}>
-          <StatusBadge
-            status={machine.status}
-            checkedAt={machine.statusCheckedAt}
-            verificationOff={reachabilityOff}
-            nativeTitle={false}
-            tabIndex={0}
-            className={FOCUSABLE}
-          />
+          <TooltipTarget className="flex">
+            <StatusBadge status={machine.status} checkedAt={machine.statusCheckedAt} verificationOff={reachabilityOff} nativeTitle={false} />
+          </TooltipTarget>
         </Tooltip>
         {!machine.seenInLastSync && (
           <Tooltip content="Não apareceu na última sincronização com o AD: pode ter sido removida ou movida para fora da OU monitorada. Continua no sistema para preservar o histórico, mas não pode ser selecionada para implantação.">
-            <MissingFromAdBadge tabIndex={0} className={FOCUSABLE} data-testid="panel-missing-badge" />
+            <TooltipTarget className="flex">
+              <MissingFromAdBadge data-testid="panel-missing-badge" />
+            </TooltipTarget>
           </Tooltip>
         )}
       </div>
@@ -55,9 +51,9 @@ export function MachineDetailsPanel({ machine, now, onClose, canCollect, reachab
         <Row label="Confirmada no AD">
           {machine.lastSync ? (
             <Tooltip content={`Confirmada no AD em ${formatDateTime(machine.lastSync)}`} align="end">
-              <span tabIndex={0} className={FOCUSABLE} data-testid="confirmed-at">
+              <TooltipTarget className="text-right" data-testid="confirmed-at">
                 {formatRelative(machine.lastSync, now)}
-              </span>
+              </TooltipTarget>
             </Tooltip>
           ) : (
             <Muted>nunca</Muted>

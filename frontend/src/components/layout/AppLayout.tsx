@@ -47,7 +47,8 @@ export function AppLayout() {
       {/* Gaveta (< 1024px) */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
-          <div className="absolute inset-0 bg-slate-950/50" onClick={() => setMobileOpen(false)} />
+          {/* Fundo escuro: atalho de mouse para fechar (o teclado usa o "Fechar menu"). */}
+          <div role="presentation" data-testid="drawer-backdrop" className="absolute inset-0 bg-slate-950/50" onClick={() => setMobileOpen(false)} />
           <aside className="relative h-full w-60 shadow-xl">
             <Sidebar
               collapsed={false}

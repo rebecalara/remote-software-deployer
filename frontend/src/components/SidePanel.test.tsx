@@ -47,6 +47,8 @@ describe('SidePanel — painel lateral (Detalhes da máquina, Catálogo)', () =>
     const onClose = vi.fn();
     const { container } = render(<SidePanel title="Painel" onClose={onClose}>x</SidePanel>);
     expect(container.firstElementChild).toHaveClass('fixed');
+    // Sem papel interativo: é só um atalho de mouse (o teclado usa Esc e o X).
+    expect(container.querySelector('.bg-slate-950\\/40')).toHaveAttribute('role', 'presentation');
     await userEvent.setup().click(container.querySelector('.bg-slate-950\\/40')!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

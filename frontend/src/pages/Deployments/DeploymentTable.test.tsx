@@ -63,10 +63,30 @@ describe('DeploymentTable — mesma tabela no Monitoramento, no Histórico e no 
     expect(screen.queryByText('Fora do catálogo')).not.toBeInTheDocument();
   });
 
-  it('Parcial com a dica "N de M máquinas concluídas"', () => {
+  // A linha é clicável: dentro dela não pode haver outro botão. As dicas do Parcial e do título
+  // vão para o botão de expandir (o elemento clicável da linha), como descrição dele.
+  it('Parcial: "N de M máquinas concluídas" é a descrição do botão de expandir; o selo não recebe foco', () => {
     renderTable([deployment({ status: 'PARTIAL' })]);
-    const badge = screen.getByText('Parcial');
-    expect(badge.closest('[data-status]')).toHaveAccessibleDescription('1 de 3 máquinas concluídas; veja as falhas');
+    expect(screen.getByRole('button', { name: 'Expandir 7-Zip 26.06' })).toHaveAccessibleDescription('1 de 3 máquinas concluídas; veja as falhas');
+    const badge = screen.getByText('Parcial').closest('[data-status]')!;
+    expect(badge.closest('button')).toBeNull();
+    expect(badge).not.toHaveAttribute('tabindex');
+  });
+
+  it('fora do catálogo: versão e ProductCode na descrição do botão de expandir; o título é só texto', () => {
+    renderTable([
+      deployment({
+        status: 'PARTIAL',
+        action: 'UNINSTALL',
+        software: null,
+        product: { productCode: '{X}', name: 'PuTTY release 0.85', version: '0.85', publisher: null },
+      }),
+    ]);
+    expect(screen.getByRole('button', { name: 'Expandir PuTTY release 0.85' })).toHaveAccessibleDescription(
+      'Versão 0.85 · ProductCode {X} · 1 de 3 máquinas concluídas; veja as falhas',
+    );
+    expect(screen.getByTestId('deployment-title').tagName).toBe('SPAN');
+    expect(screen.getByTestId('deployment-title')).not.toHaveAttribute('tabindex');
   });
 
   it('"Solicitada por" aparece em "Todas" e sai em "Minhas"', () => {

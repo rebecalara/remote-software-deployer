@@ -1,4 +1,4 @@
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import type { DeploymentAction, DeploymentCounts, DeploymentDisplayStatus, DeploymentSummary } from '../../types/deployment';
 
 // Peças compartilhadas pelo painel de uma implantação (DeploymentPanel), pelo Monitoramento e
@@ -20,22 +20,34 @@ export const STATUS_LABEL: Record<DeploymentDisplayStatus, string> = Object.from
 
 /**
  * Selo do status da implantação. "Parcial" traz a dica "N de M máquinas concluídas; veja as
- * falhas" (precisa de `counts`).
+ * falhas" (precisa de `counts`), num botão nativo. `hint={false}`: só o selo, sem dica nem
+ * foco — para quando ele está dentro de uma linha clicável (a dica vai para o botão da linha).
  */
-export function StatusBadge({ status, counts }: { status: DeploymentDisplayStatus; counts?: Pick<DeploymentCounts, 'succeeded' | 'total'> }) {
+export function StatusBadge({
+  status,
+  counts,
+  hint = true,
+}: {
+  status: DeploymentDisplayStatus;
+  counts?: Pick<DeploymentCounts, 'succeeded' | 'total'>;
+  hint?: boolean;
+}) {
   const s = STATUS_STYLE[status];
   const badge = (
     <span
       data-status={status}
-      tabIndex={status === 'PARTIAL' && counts ? 0 : undefined}
       className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-meta font-medium whitespace-nowrap ${s.className}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} aria-hidden="true" />
       {s.label}
     </span>
   );
-  if (status !== 'PARTIAL' || !counts) return badge;
-  return <Tooltip content={partialHint(counts)}>{badge}</Tooltip>;
+  if (status !== 'PARTIAL' || !counts || !hint) return badge;
+  return (
+    <Tooltip content={partialHint(counts)}>
+      <TooltipTarget className="flex">{badge}</TooltipTarget>
+    </Tooltip>
+  );
 }
 
 /** "1 de 3 máquinas concluídas; veja as falhas" */

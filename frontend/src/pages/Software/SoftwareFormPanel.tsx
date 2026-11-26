@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type DragEvent, type FormEvent, typ
 import { AlertTriangleIcon, InfoIcon, UploadIcon } from '../../components/icons';
 import { Sha256 } from '../../components/Sha256';
 import { SidePanel } from '../../components/SidePanel';
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import { ApiError, SessionExpiredError, UploadCancelledError } from '../../services/apiClient';
 import { createSoftware, updateSoftware, uploadInstaller } from '../../services/softwareService';
 import type { InstallType, InstallerLimits, Software, SoftwareUpdateInput } from '../../types/software';
@@ -40,7 +40,6 @@ const MSI_ARGS_INFO =
 const EXE_ARGS_INFO =
   'Passados ao instalador como parâmetros, nunca como linha de comando. Espaços só dentro de aspas, ex.: /DIR="C:\\Program Files\\App".';
 
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 const ICON_BUTTON =
   'rounded-md p-1 text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500/50';
 
@@ -524,9 +523,7 @@ function InstallerFileRows({ current }: { current: Software }) {
       <InfoRow label="Desinstalação">
         {current.installType === 'MSI' && current.msiProductCode ? (
           <Tooltip content={`ProductCode ${current.msiProductCode}`}>
-            <span tabIndex={0} className={FOCUSABLE} data-testid="product-code">
-              Sim (MSI)
-            </span>
+            <TooltipTarget data-testid="product-code">Sim (MSI)</TooltipTarget>
           </Tooltip>
         ) : (
           <Tooltip
@@ -536,9 +533,7 @@ function InstallerFileRows({ current }: { current: Software }) {
                 : 'Só MSI: um EXE não traz um código de produto confiável.'
             }
           >
-            <span tabIndex={0} className={FOCUSABLE} data-testid="product-code">
-              Não
-            </span>
+            <TooltipTarget data-testid="product-code">Não</TooltipTarget>
           </Tooltip>
         )}
       </InfoRow>

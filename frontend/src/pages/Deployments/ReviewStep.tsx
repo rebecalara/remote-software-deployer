@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { AlertTriangleIcon, ChevronRightIcon } from '../../components/icons';
 import { Sha256 } from '../../components/Sha256';
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import type { DeploymentAction } from '../../types/deployment';
 import type { Machine } from '../../types/machine';
 import type { Software } from '../../types/software';
@@ -27,7 +27,6 @@ interface ReviewProps {
   error: string | null;
 }
 
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 
 /**
  * Passo 3 (último): o que vai rodar e onde. O botão "Iniciar" fica na barra de baixo.
@@ -145,9 +144,7 @@ function UninstallCard({ machines, target }: { machines: Machine[]; target: Unin
             'Ativo'
           ) : (
             <Tooltip content="Desativado no catálogo: a desinstalação continua permitida.">
-              <span tabIndex={0} className={FOCUSABLE}>
-                Desativado
-              </span>
+              <TooltipTarget>Desativado</TooltipTarget>
             </Tooltip>
           )}
         </Field>
@@ -159,9 +156,9 @@ function UninstallCard({ machines, target }: { machines: Machine[]; target: Unin
                 : 'Segundo o inventário guardado de cada máquina.'
             }
           >
-            <span tabIndex={0} className={FOCUSABLE} data-testid="coverage">
+            <TooltipTarget data-testid="coverage">
               {target.machinesWith} de {machines.length}
-            </span>
+            </TooltipTarget>
           </Tooltip>
         </Field>
       </dl>

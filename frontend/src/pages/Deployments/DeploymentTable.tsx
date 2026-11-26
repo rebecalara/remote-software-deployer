@@ -3,7 +3,7 @@ import type { Deployment, DeploymentSummary } from '../../types/deployment';
 import { formatDateTime } from '../../utils/format';
 import { DeploymentPanel } from './DeploymentPanel';
 import { Tooltip } from '../../components/Tooltip';
-import { DeploymentBadges, StatusBadge, deploymentTitle, durationText } from './deploymentUi';
+import { DeploymentBadges, StatusBadge, deploymentTitle, durationText, partialHint } from './deploymentUi';
 
 // Lista de implantações do Monitoramento e do Histórico. Cada linha expande ali mesmo
 // (acordeão) e mostra o DeploymentPanel: máquinas, fases, logs e "Cancelar pendentes".
@@ -60,6 +60,26 @@ export function DeploymentTable({
             const open = openIds.has(d.id);
             const highlighted = d.id === highlightId;
             const { title, tip } = deploymentTitle(d);
+            // A linha inteira é clicável (abre a implantação): nada dentro dela pode ser outro
+            // botão. As dicas do título (versão e ProductCode, fora do catálogo) e do Parcial vão
+            // para o botão de expandir — o elemento clicável da linha —, como descrição dele.
+            const rowHint = [tip, d.status === 'PARTIAL' ? partialHint(d.counts) : null].filter(Boolean).join(' · ') || null;
+            const expand = (
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-label={`${open ? 'Recolher' : 'Expandir'} ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle(d.id);
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded hover:bg-slate-200/70"
+              >
+                <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true">
+                  ›
+                </span>
+              </button>
+            );
             return (
               <Fragment key={d.id}>
                 <tr
@@ -67,40 +87,17 @@ export function DeploymentTable({
                   onClick={() => onToggle(d.id)}
                   className={`cursor-pointer ${highlighted ? 'bg-blue-50/70 shadow-[inset_3px_0_0_0_#1d4ed8]' : open ? 'bg-slate-50' : 'hover:bg-slate-50'}`}
                 >
-                  <td className="px-3 py-3 text-slate-400">
-                    <button
-                      type="button"
-                      aria-expanded={open}
-                      aria-label={`${open ? 'Recolher' : 'Expandir'} ${title}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggle(d.id);
-                      }}
-                      className="flex h-6 w-6 items-center justify-center rounded hover:bg-slate-200/70"
-                    >
-                      <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true">
-                        ›
-                      </span>
-                    </button>
-                  </td>
+                  <td className="px-3 py-3 text-slate-400">{rowHint ? <Tooltip content={rowHint}>{expand}</Tooltip> : expand}</td>
                   <td className="px-4 py-3">
                     <p className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
-                      {tip ? (
-                        <Tooltip content={tip}>
-                          <span tabIndex={0} data-testid="deployment-title">
-                            {title}
-                          </span>
-                        </Tooltip>
-                      ) : (
-                        <span data-testid="deployment-title">{title}</span>
-                      )}
+                      <span data-testid="deployment-title">{title}</span>
                       <DeploymentBadges deployment={d} />
                     </p>
                   </td>
                   {/* Só a quantidade; "N de M concluídas" fica na dica do Parcial e nas abas ao abrir. */}
                   <td className="px-4 py-3 text-slate-600 tabular-nums">{d.counts.total}</td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={d.status} counts={d.counts} />
+                    <StatusBadge status={d.status} counts={d.counts} hint={false} />
                   </td>
                   {!hideRequester && (
                     <td className="hidden px-4 py-3 whitespace-nowrap text-slate-600 xl:table-cell">

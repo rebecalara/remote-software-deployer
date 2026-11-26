@@ -43,6 +43,14 @@ describe('ConfirmDialog — janela de confirmação do sistema', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it('o fundo escuro não tem papel interativo (role="presentation"); clicar na margem da janela não cancela', async () => {
+    const { onCancel, user } = renderDialog();
+    const backdrop = screen.getByRole('alertdialog').parentElement!;
+    expect(backdrop).toHaveAttribute('role', 'presentation');
+    await user.click(screen.getByRole('alertdialog')); // a própria janela, fora dos textos
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
   it('o botão de confirmar executa a ação', async () => {
     const { onConfirm, user } = renderDialog();
     await user.click(screen.getByRole('button', { name: 'Descartar' }));

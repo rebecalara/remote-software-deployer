@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CheckCircleIcon, ChevronRightIcon, RefreshIcon } from '../../components/icons';
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import type { InventorySummary } from '../../types/inventory';
 import { formatDateTime } from '../../utils/format';
 import { OutsideCatalogBadge, VendorBadge } from './deploymentUi';
@@ -21,7 +21,6 @@ export const OTHER_UNINSTALL_RULE =
   'declarou (QuietUninstallString), depois de conferido pelo sistema. O comando comum de ' +
   'desinstalação (UninstallString) nunca é executado.';
 
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 
 /**
  * Passo 2 em "Desinstalar": o software instalado nas máquinas selecionadas, a partir da
@@ -204,10 +203,10 @@ export function UninstallChoices({
               {blocked.map((p) => (
                 <li key={p.key}>
                   <Tooltip content={p.uninstall.reason ?? 'O programa não declarou um comando de desinstalação silenciosa.'}>
-                    <span tabIndex={0} className={FOCUSABLE} data-testid="blocked-item">
+                    <TooltipTarget data-testid="blocked-item">
                       {p.name}
                       {p.version && <span className="text-slate-400"> · {p.version}</span>}
-                    </span>
+                    </TooltipTarget>
                   </Tooltip>
                 </li>
               ))}

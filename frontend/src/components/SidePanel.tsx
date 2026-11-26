@@ -82,7 +82,8 @@ export function SidePanel({
     </div>
   ) : (
     <div className="fixed inset-0 z-30">
-      <div className="absolute inset-0 bg-slate-950/40" onClick={onClose} />
+      {/* Fundo escuro: atalho de mouse para fechar (o teclado usa Esc e o X). */}
+      <div role="presentation" className="absolute inset-0 bg-slate-950/40" onClick={onClose} />
       <div className="absolute inset-y-0 right-0 w-full max-w-md shadow-xl">{panel}</div>
     </div>
   );

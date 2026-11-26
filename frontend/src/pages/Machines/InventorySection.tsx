@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { InfoIcon, RefreshIcon, SearchIcon } from '../../components/icons';
-import { Tooltip } from '../../components/Tooltip';
+import { Tooltip, TooltipTarget } from '../../components/Tooltip';
 import { SessionExpiredError } from '../../services/apiClient';
 import { collectInventory, getInventory } from '../../services/inventoryService';
 import type { InventoryItem, InventoryState } from '../../types/inventory';
@@ -16,7 +16,6 @@ import type { NewDeploymentLocationState } from '../Deployments/NewDeploymentPag
 
 const ABOUT_LIST = 'Lidos das chaves Uninstall do registro (64 e 32 bits). Programas instalados só para um usuário não aparecem.';
 /** Elementos sem foco próprio que ganham dica: recebem foco pelo teclado. */
-const FOCUSABLE = 'rounded-md outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50';
 const ICON_BUTTON =
   'rounded-md p-1 text-slate-500 outline-none hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-blue-500/50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
@@ -143,9 +142,7 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
           'Consultando a máquina…'
         ) : inventory ? (
           <Tooltip content={`Consultado em ${formatDateTime(inventory.collectedAt)} por ${inventory.collectedBy.displayName || inventory.collectedBy.username}`}>
-            <span tabIndex={0} className={FOCUSABLE}>
-              Atualizado {formatRelative(inventory.collectedAt, now)}
-            </span>
+            <TooltipTarget>Atualizado {formatRelative(inventory.collectedAt, now)}</TooltipTarget>
           </Tooltip>
         ) : state ? (
           'Ainda não consultado'
@@ -182,9 +179,9 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
                 <li key={`${item.name}|${item.version}|${item.productCode}`} className="px-3 py-2.5 text-meta" data-item={item.name}>
                   {item.productCode ? (
                     <Tooltip content={`ProductCode ${item.productCode}`}>
-                      <span tabIndex={0} className={`block font-semibold break-words text-slate-900 ${FOCUSABLE}`} data-testid="item-name">
+                      <TooltipTarget className="block font-semibold break-words text-slate-900" data-testid="item-name">
                         {item.name}
-                      </span>
+                      </TooltipTarget>
                     </Tooltip>
                   ) : (
                     <span className="block font-semibold break-words text-slate-900" data-testid="item-name">
@@ -201,13 +198,12 @@ export function InventorySection({ machine, canCollect, now }: { machine: Machin
                       )}
                       {item.catalog && (
                         <Tooltip content={`${item.catalog.name} ${item.catalog.version} no catálogo${item.catalog.active ? '' : ' (desativado)'}`}>
-                          <span
-                            tabIndex={0}
-                            className={`rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-meta font-medium text-emerald-800 ${FOCUSABLE}`}
+                          <TooltipTarget
+                            className="border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-meta font-medium text-emerald-800"
                             data-testid="catalog-badge"
                           >
                             No catálogo
-                          </span>
+                          </TooltipTarget>
                         </Tooltip>
                       )}
                       {showUninstall &&
