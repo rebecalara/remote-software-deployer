@@ -624,6 +624,64 @@ A VM precisa sair pela porta 443 até o New Relic (`collector.newrelic.com`, ou
 O agente de navegador (*Browser*) não é usado: exigiria abrir a Content-Security-Policy para script
 e conexão de terceiros, e enviaria as URLs visitadas (com os filtros) para fora.
 
+**Eventos de segurança.** O backend registra, como log estruturado (linha `[Security]` no console e,
+com o agente ligado, um log com atributos no New Relic):
+
+| Evento | Quando | Resultado |
+|---|---|---|
+| `auth.login` | cada tentativa de login | `success`, `failure` (com o motivo), `unavailable` (AD fora do ar), `rate_limited` (429) |
+| `auth.token` | token recusado numa rota protegida (401) | `expired` (com o usuário, cuja assinatura já foi conferida) ou `invalid` (sem usuário) |
+| `authz.forbidden` | perfil sem permissão (403) | `denied`, com o papel, a rota e os papéis exigidos |
+| `deployment.created` / `deployment.cancelled` | implantação criada ou cancelada | quem, de onde, o software ou produto e quantas máquinas |
+| `deployment.finished` | a implantação encerra | status (inclusive Parcial) e as contagens |
+| `catalog.software.*` | cadastro, alteração (só os **nomes** dos campos), desativação, reativação, envio de instalador (com o SHA-256) e exclusão | quem e de onde |
+
+Atributos comuns: `security.event`, `security.result`, `user.name`, `user.role`, `client.ip` (pela
+mesma regra do limite de login: o `X-Forwarded-For` só vale vindo do Caddy). Nunca entram a senha,
+o token (nem parte dele) ou o corpo da requisição. No login com falha, o usuário digitado só é
+registrado se passar na regra de nomes; senão vira `<inválido>` (é comum alguém digitar a senha no
+campo de usuário). Um evento que falha nunca derruba a rota. Consulta no New Relic, por exemplo:
+
+```sql
+FROM Log SELECT count(*) WHERE security.event = 'auth.login' AND security.result = 'failure' FACET client.ip SINCE 1 day ago
+```
+
+**Privacidade (LGPD):** `SECURITY_EVENTS_INCLUDE_PII` (padrão `true`, que é o caso da demo). Com
+`false`, o usuário vira um hash curto (SHA-256 com o `JWT_SECRET` como sal, 12 caracteres) e o IP
+vira o prefixo de rede (`/24`). **No piloto da Prefeitura, isso deve ser decidido com a TI antes de
+ligar o New Relic**: com `true`, nomes de usuário e IPs dos operadores ficam guardados num serviço
+de fora.
+
+**Conferir que nenhum segredo sai** (`deploy\check-newrelic-secrets.ps1`, como administrador):
+
+1. No `backend.env`, acrescente `NEW_RELIC_AUDIT_LOG_ENABLED='true'` e rode
+   `Restart-Service rsd-backend`. O agente passa a escrever no log tudo o que envia.
+2. Faça um login com senha errada (anote a senha de teste), um login certo, uma ação proibida para
+   o perfil e, se quiser, uma implantação. Espere uns 2 minutos.
+3. Rode `.\deploy\check-newrelic-secrets.ps1`. Ele procura cada segredo do `backend.env` (e a senha
+   de teste) nos logs de `C:\rsd\logs` desde a subida do serviço e mostra só nomes, contagens e
+   linhas, nunca o valor. A chave do New Relic no transporte ao coletor (`license_key=` na URL,
+   cabeçalho `X-License-Key`) é esperada; em qualquer outro lugar, conta como vazamento.
+4. O script oferece apagar os logs do período (digite `SIM`) e lembra de **desligar o audit log**:
+   tire a linha do `backend.env` e reinicie o serviço.
+
+**Monitor de disponibilidade (no site do New Relic, sem código):**
+
+1. *Synthetic monitoring* > *Create monitor* > *Availability* (monitor do tipo **Ping**).
+2. URL: `https://rsd-demo-rebeca.chilecentral.cloudapp.azure.com/api/health`; *validation string*:
+   `"status":"ok"` (sem banco, o `/health` responde 503 e o monitor também falha).
+3. Marque *Bypass HEAD request* (o ping usa `HEAD` por padrão, sem corpo, e a validação precisa do
+   corpo).
+4. Frequência de 5 minutos e **um** local: Santiago, se houver, senão **São Paulo** (cada local
+   multiplica as checagens). Pela documentação do New Relic, o limite de checagens do plano
+   gratuito não vale para o monitor de ping.
+5. *Alerts* > *Alert policies* > nova política "RSD" > *New alert condition* > *Use guided mode* >
+   *Synthetic monitors*: escolha o monitor e salve. O alerta dispara depois de 3 falhas seguidas
+   no mesmo local.
+6. *Alerts* > *Destinations* > *Email* com o seu e-mail; *Alerts* > *Workflows*: filtre pela
+   política "RSD" e escolha esse destino.
+7. Teste: pare o `rsd-backend` por uns 20 minutos, confira o e-mail e inicie o serviço de novo.
+
 ## Limitações conhecidas
 
 - **Validação na rede real pendente.** O login (bind) já foi testado no AD real com uma
