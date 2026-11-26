@@ -35,6 +35,19 @@ export function AppLayout() {
   // Trocar de página fecha a gaveta no mobile.
   useEffect(() => setMobileOpen(false), [pathname]);
 
+  // Esc fecha a gaveta — a não ser que haja uma janela de confirmação aberta por cima: o Esc
+  // é dela (mesma regra do painel lateral).
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('[role=alertdialog]')) return;
+      setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   const title = titleForPath(pathname);
 
   return (
@@ -47,7 +60,7 @@ export function AppLayout() {
       {/* Gaveta (< 1024px) */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
-          {/* Fundo escuro: atalho de mouse para fechar (o teclado usa o "Fechar menu"). */}
+          {/* Fundo escuro: atalho de mouse para fechar (o teclado usa Esc e o "Fechar menu"). */}
           <div role="presentation" data-testid="drawer-backdrop" className="absolute inset-0 bg-slate-950/50" onClick={() => setMobileOpen(false)} />
           <aside className="relative h-full w-60 shadow-xl">
             <Sidebar
