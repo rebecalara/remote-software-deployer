@@ -1,0 +1,123 @@
+name: CI
+
+# Testes, cobertura, build e análise estática (SonarCloud). Deploy fica para outra tarefa.
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+# Só leitura do código. O SonarCloud comenta nos PRs pelo próprio app do GitHub, não pelo
+# GITHUB_TOKEN; por isso não precisa de pull-requests: read.
+permissions:
+  contents: read
+
+# Uma execução por branch (ou por PR); um push novo cancela a anterior.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — testes, cobertura e build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      # Fora do Windows, os testes com o powershell.exe real são pulados (describe.skip).
+      - run: npm run test:cov -- --ci
+      - run: npm run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-backend
+          path: backend/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  frontend:
+    name: Frontend — testes, cobertura e build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci # usa o frontend/.npmrc (legacy-peer-deps)
+      - run: npm run test:cov
+      - run: npm run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  sonar:
+    name: SonarCloud — análise estática e cobertura
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      # O contexto `secrets` não pode ser usado no `if` de um job: a checagem é um passo.
+      # Sem token (PR de fork, por exemplo), o job termina em sucesso com um aviso, sem analisar.
+      - name: Confere o token do SonarCloud
+        id: token
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::SONAR_TOKEN indisponível (ex.: PR de fork). Análise do SonarCloud pulada."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: steps.token.outputs.present == 'true'
+        with:
+          fetch-depth: 0 # histórico completo: o Sonar usa o blame para o "código novo"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.token.outputs.present == 'true'
+        with:
+          name: coverage-backend
+          path: backend/coverage
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.token.outputs.present == 'true'
+        with:
+          name: coverage-frontend
+          path: frontend/coverage
+      # Jest e Vitest gravam caminhos relativos à própria pasta (SF:src/...); o Sonar
+      # resolve a partir da raiz do repositório.
+      - name: Ajusta os caminhos do lcov para a raiz do repositório
+        if: steps.token.outputs.present == 'true'
+        run: |
+          sed -i 's#^SF:src/#SF:backend/src/#' backend/coverage/lcov.info
+          sed -i 's#^SF:src/#SF:frontend/src/#' frontend/coverage/lcov.info
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.token.outputs.present == 'true'
+        with:
+          path: ~/.sonar/cache
+          key: sonar-${{ runner.os }}
+          restore-keys: sonar-${{ runner.os }}
+      # Sem sonar.qualitygate.wait: o Quality Gate aparece no SonarCloud e no badge, mas não
+      # bloqueia o pipeline (ver README, "Integração contínua").
+      - uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        if: steps.token.outputs.present == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

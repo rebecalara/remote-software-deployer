@@ -1,0 +1,216 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+/// Resultado da verificação periódica da porta do WinRM (5985), só teste de conexão TCP:
+/// nenhuma autenticação, nenhum comando. ONLINE = "respondendo no WinRM" (a porta aceitou
+/// conexão), e NÃO "ligada" ou "pronta para implantar"; OFFLINE = "sem resposta" (recusou,
+/// tempo esgotado ou nome não encontrado no DNS); UNKNOWN = ainda não verificada. Os
+/// nomes dos valores ficaram os originais; a tela mostra os textos honestos.
+enum MachineStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+enum DeploymentStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+// SCRIPT removido de propósito: "instalar via script" seria execução arbitrária
+// (regra do projeto). O comando-base é sempre decidido pelo tipo.
+enum InstallType {
+  MSI
+  EXE
+}
+
+/// O que a implantação faz nas máquinas. Desinstalar só existe para MSI.
+enum DeploymentAction {
+  INSTALL
+  UNINSTALL
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+model User {
+  id          String   @id @default(uuid())
+  /// Sempre em minúsculas: CHECK "User_username_lowercase_check" (migração
+  /// 20261125150000_user_username_lowercase, escrita à mão — o Prisma não declara CHECK).
+  username    String   @unique
+  displayName String
+  email       String?
+  role        UserRole
+  createdAt   DateTime @default(now())
+
+  deployments     Deployment[]
+  softwareCreated Software[]         @relation("SoftwareCreatedBy")
+  softwareUpdated Software[]         @relation("SoftwareUpdatedBy")
+  inventories     MachineInventory[]
+}
+
+model Machine {
+  id              String        @id @default(uuid())
+  hostname        String        @unique
+  ipAddress       String?
+  operatingSystem String?
+  department      String?
+  status          MachineStatus @default(UNKNOWN)
+  /// Quando a porta do WinRM foi verificada pela última vez (null = nunca).
+  statusCheckedAt DateTime?
+  lastSync        DateTime?
+
+  targets   DeploymentTarget[]
+  inventory MachineInventory?
+}
+
+/// RF08: a ÚLTIMA consulta bem-sucedida do software instalado numa máquina (uma linha
+/// por máquina, sobrescrita a cada consulta, sem histórico). items = lista lida das
+/// chaves Uninstall do registro (JSON). A marcação "no catálogo" é calculada na leitura.
+model MachineInventory {
+  machineId     String   @id
+  collectedAt   DateTime
+  collectedById String
+  items         Json
+
+  // CASCADE: o inventário é só uma foto da máquina. RESTRICT no usuário: preserva o
+  // rastro de quem consultou, como na auditoria do catálogo.
+  machine     Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  collectedBy User    @relation(fields: [collectedById], references: [id], onDelete: Restrict)
+
+  @@index([collectedById])
+}
+
+model Software {
+  id          String      @id @default(uuid())
+  name        String
+  version     String
+  vendor      String?
+  installType InstallType
+  // Tokens passados como parâmetros ao instalador — nunca uma linha de comando.
+  installArgs String[]    @default([])
+  active      Boolean     @default(true)
+
+  // Instalador: preenchido pelo servidor no envio (PUT /software/:id/installer),
+  // nunca digitado. Opcional porque o cadastro (JSON) vem antes do arquivo.
+  installerFileName     String?   @unique // "<uuid>.msi" | "<uuid>.exe"
+  installerOriginalName String? // só para exibição
+  installerSizeBytes    Int? // Int (não BigInt): limite de envio travado em 2000 MB
+  installerSha256       String? // calculado no envio
+  installerUploadedAt   DateTime?
+  /// ProductCode do MSI ({GUID}), lido pelo servidor do próprio pacote no envio
+  /// (scripts/read-msi-info.ps1). Nulo para EXE ou se a leitura falhar. É o que a
+  /// desinstalação usa — o instalador não precisa ser copiado para a máquina.
+  msiProductCode        String?
+
+  // Auditoria (RN06 / RNF09): quem cadastrou e quem alterou por último.
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User?        @relation("SoftwareCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy   User?        @relation("SoftwareUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deployments Deployment[]
+
+  @@unique([name, version])
+  @@index([createdById])
+  @@index([updatedById])
+}
+
+model Deployment {
+  id         String           @id @default(uuid())
+  name       String
+  userId     String
+  /// Software do catálogo. Nulo só na desinstalação de um MSI que não está no catálogo
+  /// (ver o CHECK "Deployment_software_or_product_check" na migration).
+  softwareId String?
+  status     DeploymentStatus @default(PENDING)
+  action     DeploymentAction @default(INSTALL)
+  createdAt  DateTime         @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  /// Desinstalação: cópia do produto no momento da criação (do catálogo ou do inventário
+  /// guardado das máquinas). O runner usa este ProductCode; o Histórico mostra o nome
+  /// mesmo que o produto não esteja (ou deixe de estar) no catálogo.
+  productCode      String?
+  productName      String?
+  productVersion   String?
+  productPublisher String?
+
+  /// Desinstalação de programa que NÃO é MSI (exceção controlada, DECISIONS.md): a
+  /// subchave Uninstall (64 ou 32 bits) e o QuietUninstallString do fabricante, como
+  /// estavam no inventário guardado. Na máquina, o comando relido precisa ser idêntico.
+  uninstallKey     String?
+  uninstallArch    String?
+  uninstallCommand String?
+
+  user     User               @relation(fields: [userId], references: [id])
+  // Restrict explícito: numa relação opcional o padrão do Prisma seria SetNull, e apagar
+  // um software esvaziaria o vínculo das implantações. Mantém o comportamento de antes.
+  software Software?          @relation(fields: [softwareId], references: [id], onDelete: Restrict)
+  targets  DeploymentTarget[]
+
+  @@index([userId])
+  @@index([softwareId])
+  /// Ordem de todas as listas (createdAt desc, id desc) e filtro por período (Histórico, CSV).
+  @@index([createdAt, id])
+  /// Em andamento (finishedAt nulo), encerradas nas últimas 24 h e resumo do Dashboard.
+  @@index([finishedAt])
+  /// Filtro Instalação / Desinstalação do Histórico.
+  @@index([action])
+}
+
+model DeploymentTarget {
+  id           String           @id @default(uuid())
+  deploymentId String
+  machineId    String
+  status       DeploymentStatus @default(PENDING)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  /// Código de saída do instalador na máquina de destino (RF09). Nulo enquanto
+  /// não executou, ou quando a falha aconteceu antes da execução (conexão,
+  /// cópia, hash, tempo esgotado).
+  exitCode     Int?
+
+  deployment Deployment      @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  machine    Machine         @relation(fields: [machineId], references: [id])
+  logs       DeploymentLog[]
+
+  @@unique([deploymentId, machineId])
+  @@index([machineId])
+  /// Máquinas em execução/na fila (resumo, implantação duplicada) e status Parcial.
+  @@index([status])
+}
+
+model DeploymentLog {
+  id                 String   @id @default(uuid())
+  deploymentTargetId String
+  timestamp          DateTime @default(now())
+  level              LogLevel
+  message            String
+
+  deploymentTarget DeploymentTarget @relation(fields: [deploymentTargetId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentTargetId, timestamp])
+}

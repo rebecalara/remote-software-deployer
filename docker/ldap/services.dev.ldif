@@ -1,0 +1,15 @@
+# Conta de serviço de leitura do ambiente LOCAL (espelha a conta pedida à infra).
+# Senha fictícia, válida só no container openldap-dev — nunca usar em outro lugar.
+# Permissões: ver acl-leitura-computers.ldif (leitura só em ou=computers).
+
+dn: ou=services,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: services
+description: Contas de serviço (não são pessoas)
+
+dn: uid=svc-rsd-leitura,ou=services,dc=rsd,dc=local
+objectClass: account
+objectClass: simpleSecurityObject
+uid: svc-rsd-leitura
+description: Leitura de computadores para o Remote Software Deployer (dev)
+userPassword: leitura-dev-123

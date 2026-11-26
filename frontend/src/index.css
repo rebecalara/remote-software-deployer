@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  /*
+   * Fonte SÓ da marca (">rsd_"), classe font-brand. O font-mono do Tailwind fica intocado:
+   * é ele que mostra nomes de máquina, versões e hashes.
+   */
+  --font-brand: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /*
+   * Animações da marca (login). Mesmas cores de status da interface: na fila (slate-700)
+   * → instalando (amber-500) → ok (emerald-500). Respeitam "reduzir movimento"
+   * (prefers-reduced-motion): com ele ligado, quem usa aplica motion-reduce:animate-none e
+   * a marca fica parada — grade no estado do RsdMark, barra cheia, cursor visível sem
+   * piscar (RsdLoginBrand, RsdWordmark). A logo do menu só anima com motion-safe.
+   */
+  --animate-rsd-deploy: rsd-deploy 4.8s ease-in-out infinite;
+  --animate-rsd-fill: rsd-fill 4.8s ease-in-out infinite;
+  --animate-rsd-blink: rsd-blink 1s steps(1) infinite;
+  /* Logo do menu: o mesmo efeito, mais rápido, só enquanto o mouse está em cima (SVG: fill) */
+  --animate-rsd-deploy-fill: rsd-deploy-fill 2.4s ease-in-out infinite;
+
+  @keyframes rsd-deploy-fill {
+    0%,
+    12% {
+      fill: var(--color-slate-700);
+    }
+    28%,
+    40% {
+      fill: var(--color-amber-500);
+    }
+    55%,
+    92% {
+      fill: var(--color-emerald-500);
+    }
+    100% {
+      fill: var(--color-slate-700);
+    }
+  }
+
+  @keyframes rsd-deploy {
+    0%,
+    12% {
+      background-color: var(--color-slate-700);
+    }
+    28%,
+    40% {
+      background-color: var(--color-amber-500);
+    }
+    55%,
+    92% {
+      background-color: var(--color-emerald-500);
+    }
+    100% {
+      background-color: var(--color-slate-700);
+    }
+  }
+  @keyframes rsd-fill {
+    0%,
+    10% {
+      transform: scaleX(0);
+    }
+    60%,
+    92% {
+      transform: scaleX(1);
+    }
+    100% {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes rsd-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  /* 1440 px: a partir daqui os cinco cartões do Dashboard cabem numa linha sem cortar texto */
+  --breakpoint-wide: 90rem;
+
+  /*
+   * Escala tipográfica ÚNICA do sistema (DECISIONS.md). Os tamanhos e pesos padrão do
+   * Tailwind são desligados de propósito: um text-sm ou font-bold esquecido deixa de
+   * funcionar, em vez de criar um sexto tamanho em silêncio.
+   */
+  --text-*: initial;
+  /* Título da página (cabeçalho de cada tela, "Entrar no sistema"): 20 px */
+  --text-page: 1.25rem;
+  --text-page--line-height: 1.75rem;
+  /* Título de seção (cartões, painéis, passos, diálogos): 15 px */
+  --text-section: 0.9375rem;
+  --text-section--line-height: 1.375rem;
+  /* Texto normal (menu, tabelas, botões, títulos dos cartões, campos): 14 px */
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  /* Texto secundário (detalhes em cinza, datas, legendas, selos): 12 px */
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1rem;
+  /*
+   * Campos de formulário (input, select, textarea) no CELULAR (abaixo de 768 px): 16 px.
+   * O Safari do iPhone dá zoom ao tocar num campo com menos de 16 px. No computador, os
+   * campos seguem o texto normal (14 px). A regra que aplica fica no fim deste arquivo.
+   */
+  --text-field-mobile: 1rem;
+  /* Número dos cartões (Dashboard e Monitoramento): 26 px */
+  --text-stat: 1.625rem;
+  --text-stat--line-height: 2rem;
+  /* Exceção: só a marca no painel escuro do login (36 px; 48 px em telas largas) */
+  --text-brand: 2.25rem;
+  --text-brand--line-height: 2.5rem;
+  --text-brand-xl: 3rem;
+  --text-brand-xl--line-height: 1;
+
+  /* Só três pesos */
+  --font-weight-*: initial;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+}
+
+/*
+ * Padrões do navegador que fugiam da escala: texto sem classe herdava 16 px (campos e
+ * botões do login, rótulos só para leitor de tela), e th / strong vinham em negrito (700).
+ */
+@layer base {
+  body {
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+  th {
+    font-weight: inherit;
+  }
+  b,
+  strong {
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+/*
+ * Campos no celular com 16 px (token --text-field-mobile). Fora de @layer de propósito: os
+ * campos já têm a classe text-body, e uma regra sem camada vence as camadas do Tailwind —
+ * dentro de @layer base, a classe venceria e o Safari continuaria dando zoom.
+ */
+@media (width < 48rem) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select,
+  textarea {
+    font-size: var(--text-field-mobile);
+  }
+}

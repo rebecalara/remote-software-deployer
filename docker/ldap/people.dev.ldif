@@ -1,0 +1,29 @@
+# Usuários de LOGIN fictícios para desenvolvimento local — nenhum usuário real.
+# Senhas fictícias, só valem neste container.
+#
+# O papel (ADMIN / OPERATOR / VIEWER) NÃO vem do LDAP: vem da tabela User do banco do
+# sistema, que precisa ter uma linha com o mesmo username. No banco local:
+#   INSERT INTO "User" (id, username, "displayName", role)
+#   VALUES (gen_random_uuid(), 'testuser', '', 'ADMIN') ON CONFLICT (username) DO NOTHING;
+#   INSERT INTO "User" (id, username, "displayName", role)
+#   VALUES (gen_random_uuid(), 'viewer', 'Usuário Visualizador', 'VIEWER') ON CONFLICT (username) DO NOTHING;
+
+dn: ou=people,dc=rsd,dc=local
+objectClass: organizationalUnit
+ou: people
+
+# Perfil ADMIN do dia a dia de desenvolvimento (mesma senha de dev do CLAUDE.md).
+dn: uid=testuser,ou=people,dc=rsd,dc=local
+objectClass: inetOrgPerson
+uid: testuser
+cn: Test User
+sn: User
+userPassword: senha123
+
+# Perfil somente leitura, para conferir o que VIEWER vê e não vê nas telas.
+dn: uid=viewer,ou=people,dc=rsd,dc=local
+objectClass: inetOrgPerson
+uid: viewer
+cn: Usuário Visualizador
+sn: Visualizador
+userPassword: viewer-dev-123
