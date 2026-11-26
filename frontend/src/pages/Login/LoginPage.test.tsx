@@ -77,6 +77,15 @@ describe('LoginPage', () => {
     expect(sessionStorage.getItem('rsd.auth')).toBeNull();
   });
 
+  it('resposta do login fora do formato (perfil desconhecido): mensagem e nada é gravado', async () => {
+    mockLogin(200, { accessToken: fakeToken(3600), user: { ...TEST_USER, role: 'ROOT' } });
+    renderLogin();
+    await fillAndSubmit();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Resposta de login inválida do servidor.');
+    expect(sessionStorage.getItem('rsd.auth')).toBeNull();
+    expect(screen.queryByText('Dashboard')).not.toBeInTheDocument();
+  });
+
   it('429: mostra a mensagem do servidor com o tempo de espera', async () => {
     mockLogin(429, { message: 'Muitas tentativas de login a partir deste endereço. Tente novamente em 15 minutos.' });
     renderLogin();
