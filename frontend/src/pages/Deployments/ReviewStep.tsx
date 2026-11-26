@@ -36,6 +36,7 @@ export function ReviewStep({ machines, software, action, uninstallTarget, requir
   const uninstall = action === 'UNINSTALL';
   const target = uninstall ? uninstallTarget! : null;
   const vendor = target?.method === 'VENDOR';
+  const notice = restartNotice(vendor ? 'VENDOR' : !uninstall && software?.installType === 'EXE' ? 'EXE' : 'MSI');
 
   return (
     <div className="space-y-4">
@@ -46,18 +47,10 @@ export function ReviewStep({ machines, software, action, uninstallTarget, requir
 
       <WinRmWarning machines={machines} />
 
-      {/* Um aviso só. O comando do fabricante pode reiniciar a máquina: a frase muda. */}
-      <Notice
-        testId="review-notice"
-        info={
-          vendor
-            ? 'O comando é do fabricante do programa, não do sistema: pode reiniciar a máquina sem aviso. Se ele tentar abrir uma janela, ninguém a verá (roda sem área de trabalho) e ele será encerrado no tempo limite.'
-            : 'Se o instalador pedir reinício, a máquina fica registrada com o aviso "reinício pendente".'
-        }
-      >
-        {vendor
-          ? 'Executa como administrador. O comando do fabricante pode reiniciar a máquina. Máquinas desligadas ficam registradas como falha.'
-          : 'Executa como administrador. As máquinas nunca são reiniciadas. Máquinas desligadas ficam registradas como falha.'}
+      {/* Um aviso só. "Nunca são reiniciadas" vale só para MSI (REBOOT=ReallySuppress por
+          último): um EXE e o comando do fabricante podem reiniciar a máquina sozinhos. */}
+      <Notice testId="review-notice" info={notice.info}>
+        {notice.text}
       </Notice>
 
       {requireConfirm && (
@@ -286,6 +279,31 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <dd className="min-w-0 text-slate-800">{children}</dd>
     </div>
   );
+}
+
+/**
+ * Aviso do Revisar sobre reinício. MSI (instalar ou desinstalar): o sistema garante que não
+ * reinicia. EXE: o sistema só repassa os argumentos do catálogo e não impede um instalador que
+ * reinicia sozinho. Comando do fabricante: idem, e ainda pode abrir janela que ninguém vê.
+ */
+export function restartNotice(kind: 'MSI' | 'EXE' | 'VENDOR'): { text: string; info: string } {
+  switch (kind) {
+    case 'VENDOR':
+      return {
+        text: 'Executa como administrador. O comando do fabricante pode reiniciar a máquina. Máquinas desligadas ficam registradas como falha.',
+        info: 'O comando é do fabricante do programa, não do sistema: pode reiniciar a máquina sem aviso. Se ele tentar abrir uma janela, ninguém a verá (roda sem área de trabalho) e ele será encerrado no tempo limite.',
+      };
+    case 'EXE':
+      return {
+        text: 'Executa como administrador. O sistema não reinicia as máquinas, mas um instalador EXE pode reiniciar sozinho. Máquinas desligadas ficam registradas como falha.',
+        info: 'Para evitar, inclua nos argumentos do catálogo a opção do fabricante para não reiniciar. Se o instalador pedir reinício, a máquina fica com o aviso "reinício pendente"; se ele mesmo reiniciar (código 1641), isso fica registrado no resultado.',
+      };
+    case 'MSI':
+      return {
+        text: 'Executa como administrador. As máquinas nunca são reiniciadas. Máquinas desligadas ficam registradas como falha.',
+        info: 'Se o instalador pedir reinício, a máquina fica registrada com o aviso "reinício pendente".',
+      };
+  }
 }
 
 function Notice({ children, info, testId }: { children: ReactNode; info: string; testId?: string }) {

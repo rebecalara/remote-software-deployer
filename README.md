@@ -211,10 +211,12 @@ que a VM concluiu e a outra máquina, fictícia, falhou por não existir na rede
     e executado por outro script fixo
     ([`backend/scripts/uninstall-program-target.ps1`](backend/scripts/uninstall-program-target.ps1)).
     Detalhes na seção de desinstalação, acima.
-- **O sistema nunca reinicia as máquinas.** O MSI roda com `/norestart`, e
+- **O sistema não reinicia as máquinas; no MSI, isso é garantido.** O MSI roda com `/norestart`, e
   `REBOOT=ReallySuppress` é sempre o último argumento, na instalação e na desinstalação. O catálogo recusa `REBOOT` com
   outro valor. Isso foi encontrado na prática: na VM de teste, um `REBOOT=Force` vindo
-  do catálogo reiniciou a máquina antes dessa proteção existir.
+  do catálogo reiniciou a máquina antes dessa proteção existir. Um instalador EXE pode
+  reiniciar por conta própria (ver [Limitações conhecidas](#limitações-conhecidas)); a tela
+  Revisar avisa isso.
 - **Pasta temporária protegida.** Na estação, o instalador fica em `C:\ProgramData\RSD\<alvo>`,
   criada pela sessão WinRM já com permissão só para SYSTEM e Administradores, sem herança
   ([`backend/scripts/temp-dir-rules.ps1`](backend/scripts/temp-dir-rules.ps1)). Antes de usar, a
