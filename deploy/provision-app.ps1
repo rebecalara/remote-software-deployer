@@ -468,7 +468,7 @@ $deployLines = @(
   '# Gerado pelo provision-app.ps1. Só o runner (rsd-runner) lê este arquivo.'
   "DATABASE_URL=`"$ownerUrl`""
   "RSD_PUBLIC_HOST=`"$PublicHost`""
-  "PG_BIN=`"$PgRoot\bin`""
+  "PG_BIN='$PgRoot\bin'" # caminho do Windows: aspas simples (ver backend.env.example)
 )
 [IO.File]::WriteAllLines($P.DeployEnv, $deployLines, (New-Object Text.UTF8Encoding($false)))
 if (-not (Test-Path $P.BackendEnv)) {

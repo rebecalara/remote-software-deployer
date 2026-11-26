@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parse as dotenvParse } from 'dotenv';
 import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './deployments/testing/real-powershell';
 
 // Scripts de produção (pasta deploy/ na raiz do repositório): preparo da VM (provision-app.ps1),
@@ -602,7 +603,7 @@ describe('deploy/rsd-backend.xml e backend.env.example', () => {
       env
         .split('\n')
         .filter((l) => /^[A-Z_]+=/.test(l))
-        .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^"|"$/g, '')]),
+        .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).replace(/^["']|["']$/g, '')]),
     );
     expect(values.JWT_SECRET).toBe('');
     expect(values.LDAP_SEARCH_BIND_PASSWORD).toBe('');
@@ -610,6 +611,36 @@ describe('deploy/rsd-backend.xml e backend.env.example', () => {
     expect(values.DATABASE_URL).toBe('__DATABASE_URL__');
     expect(values.INSTALLER_STORAGE_DIR).toBe('__INSTALLER_STORAGE_DIR__');
     expect(values.HOST).toBe('127.0.0.1');
+  });
+
+  // Na VM: INSTALLER_STORAGE_DIR="C:\rsd\data\installers" virou "C:" + CR + "sd\data\installers"
+  // (o dotenv troca \r e \n dentro de aspas duplas).
+  const envExamples: [string, string][] = [
+    ['deploy/backend.env.example', join(DEPLOY, 'backend.env.example')],
+    ['backend/.env.example', join(DEPLOY, '..', 'backend', '.env.example')],
+    ['frontend/.env.example', join(DEPLOY, '..', 'frontend', '.env.example')],
+  ];
+  it.each(envExamples)('%s: nenhum valor entre aspas duplas com \\r, \\n ou \\t', (_name, file) => {
+    const bad = readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => /^\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*"[^"]*\\[rnt][^"]*"/.test(line));
+    expect(bad).toEqual([]);
+  });
+
+  it('o backend.env que o provision gera (marcadores trocados) chega ao backend com o caminho exato', () => {
+    const appUrl = 'postgresql://rsd_app:Ab-_9@127.0.0.1:5432/rsd?schema=public';
+    // Os mesmos Replace do passo 7 do provision.
+    expect(provision).toContain(".Replace('__DATABASE_URL__', $appUrl).Replace('__INSTALLER_STORAGE_DIR__', $P.Installers)");
+    const rendered = env.replace('__DATABASE_URL__', appUrl).replace('__INSTALLER_STORAGE_DIR__', 'C:\\rsd\\data\\installers');
+    const values = dotenvParse(Buffer.from(rendered));
+    expect(values.INSTALLER_STORAGE_DIR).toBe('C:\\rsd\\data\\installers');
+    expect(values.DATABASE_URL).toBe(appUrl);
+  });
+
+  it('deploy.env: PG_BIN (caminho do Windows) entre aspas simples', () => {
+    expect(provision).toContain(`"PG_BIN='$PgRoot\\bin'"`);
+    expect(provision).not.toMatch(/PG_BIN=`"/);
   });
 });
 
@@ -636,6 +667,25 @@ onWindows('rsd-deploy-common.ps1 — funções (PowerShell de verdade, numa past
         before: { A: '1', B: 'dois', C: 'três', D: 'x=y' },
         after: { A: '1', B: 'novo', C: 'três', D: 'x=y', E: '' },
         lines: ['# comentário', 'A="1"', 'B="novo"', 'C=três', '', 'D="x=y"', 'E=""'],
+      });
+    },
+    T,
+  );
+
+  it(
+    'Set-EnvValue com caminho do Windows grava entre aspas simples, e o dotenv do backend lê o caminho exato',
+    () => {
+      const out = runPs(`
+        $f = Join-Path '${dir}' 'y.env'
+        Set-EnvValue -Path $f -Key 'INSTALLER_STORAGE_DIR' -Value 'C:\\rsd\\data\\installers'
+        Set-EnvValue -Path $f -Key 'NODE_EXTRA_CA_CERTS' -Value 'C:\\rsd\\config\\rsd-ca.pem'
+        try { Set-EnvValue -Path $f -Key 'X' -Value "C:\\it's"; $err = $null } catch { $err = $_.Exception.Message }
+        ConvertTo-Json @{ lines = [IO.File]::ReadAllLines($f); err = $err }`) as { lines: string[]; err: string | null };
+      expect(out.lines).toEqual(["INSTALLER_STORAGE_DIR='C:\\rsd\\data\\installers'", "NODE_EXTRA_CA_CERTS='C:\\rsd\\config\\rsd-ca.pem'"]);
+      expect(out.err).toMatch(/não tem forma segura/);
+      expect(dotenvParse(Buffer.from(out.lines.join('\n')))).toEqual({
+        INSTALLER_STORAGE_DIR: 'C:\\rsd\\data\\installers',
+        NODE_EXTRA_CA_CERTS: 'C:\\rsd\\config\\rsd-ca.pem',
       });
     },
     T,

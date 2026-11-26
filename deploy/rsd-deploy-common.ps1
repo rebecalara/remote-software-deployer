@@ -59,7 +59,14 @@ function Set-EnvValue {
   param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Key, [Parameter(Mandatory)][AllowEmptyString()][string]$Value)
   $lines = [Collections.Generic.List[string]]::new()
   if (Test-Path -LiteralPath $Path) { $lines.AddRange([IO.File]::ReadAllLines($Path)) }
-  $newLine = "$Key=`"$Value`""
+  # Com barra invertida (caminho do Windows), aspas simples: entre aspas duplas o dotenv do backend
+  # troca \r e \n por quebra de linha.
+  if ($Value.Contains('\')) {
+    if ($Value.Contains("'")) { throw "Set-EnvValue: valor de $Key com barra invertida e aspas simples não tem forma segura no .env." }
+    $newLine = "$Key='$Value'"
+  } else {
+    $newLine = "$Key=`"$Value`""
+  }
   $found = $false
   for ($i = 0; $i -lt $lines.Count; $i++) {
     if ($lines[$i] -match "^\s*$([regex]::Escape($Key))\s*=") { $lines[$i] = $newLine; $found = $true }
