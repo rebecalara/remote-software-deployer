@@ -1035,7 +1035,7 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
       JWT_SECRET: 'jwtSegredoDeTeste0123456789abcdefXYZ',
       LDAP_SEARCH_BIND_PASSWORD: 'LdapSenhaTeste',
       WINRM_PASSWORD: '',
-      NEW_RELIC_LICENSE_KEY: 'abcdef0123456789abcdef0123456789abcdNRAL',
+      NEW_RELIC_LICENSE_KEY: 'abcdef0123456789'.repeat(2) + 'abcd' + 'NRAL', // montada: nenhuma literal no formato de uma license key
       DATABASE_URL: 'postgresql://rsd_app:Db%40Senha_9@127.0.0.1:5432/rsd?schema=public',
     };
     const KEY = ENV.NEW_RELIC_LICENSE_KEY;

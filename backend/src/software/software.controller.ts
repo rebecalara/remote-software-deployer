@@ -88,7 +88,7 @@ export class SoftwareController {
     const input = validateSoftwareUpdate(body);
     return Promise.resolve(this.softwareService.update(id, input, userIdOf(req))).then((view) => {
       // Só os NOMES dos campos alterados (os valores ficam na auditoria do próprio software).
-      catalogEvent('catalog.software.updated', req, () => ({ ...softwareDetails(view), 'software.fields': Object.keys(input).sort().join(',') }));
+      catalogEvent('catalog.software.updated', req, () => ({ ...softwareDetails(view), 'software.fields': Object.keys(input).sort((a, b) => a.localeCompare(b)).join(',') }));
       return view;
     });
   }

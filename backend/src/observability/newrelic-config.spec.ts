@@ -74,31 +74,34 @@ describe('backend/newrelic.js', () => {
 });
 
 describe('chave do New Relic fora do repositório e do CI', () => {
-  const tracked = execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' })
+  const allTracked = execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' })
     .split('\n')
-    .filter((f) => f && !/(^|\/)(package-lock\.json|node_modules\/)/.test(f) && !/\.(png|jpe?g|ico|woff2?|ttf|pdf|msi|exe)$/i.test(f))
-    // Os testes precisam de valores FALSOS de segredo (para provar o mascaramento); o resto do
-    // repositório — código, scripts, modelos de .env, workflows, documentação — é varrido.
-    .filter((f) => !/\.spec\.ts$/.test(f));
+    .filter((f) => f && !/(^|\/)(package-lock\.json|node_modules\/)/.test(f) && !/\.(png|jpe?g|ico|woff2?|ttf|pdf|msi|exe)$/i.test(f));
+  // Os testes atribuem valores FALSOS à variável (para provar o mascaramento); a regra da
+  // atribuição vale para o resto: código, scripts, modelos de .env, workflows, documentação.
+  const tracked = allTracked.filter((f) => !/\.spec\.ts$/.test(f));
+  const read = (f: string): string => {
+    try {
+      return readFileSync(join(REPO, f), 'utf8');
+    } catch {
+      return '';
+    }
+  };
 
-  it('a varredura cobre o código e os modelos de .env', () => {
+  it('a varredura cobre o código, os modelos de .env e os testes', () => {
     expect(tracked).toEqual(expect.arrayContaining(['backend/newrelic.js', 'backend/.env.example', 'deploy/backend.env.example', 'backend/src/main.ts']));
+    expect(allTracked).toEqual(expect.arrayContaining(['backend/src/observability/redact.spec.ts', 'README.md']));
   });
 
-  it('nenhum arquivo versionado (fora os testes) preenche NEW_RELIC_LICENSE_KEY nem tem uma chave de licença', () => {
-    const offenders: string[] = [];
-    for (const f of tracked) {
-      let text: string;
-      try {
-        text = readFileSync(join(REPO, f), 'utf8');
-      } catch {
-        continue;
-      }
-      // Atribuição com valor (vazio "" ou '' é o modelo); chave de licença tem 40 caracteres e
-      // termina em "NRAL".
-      if (/NEW_RELIC_LICENSE_KEY\s*[=:]\s*["']?[A-Za-z0-9]/.test(text) || /\b[A-Za-z0-9]{36}NRAL\b/.test(text)) offenders.push(f);
-    }
-    expect(offenders).toEqual([]);
+  it('nenhum arquivo versionado (fora os testes) preenche NEW_RELIC_LICENSE_KEY', () => {
+    // Atribuição com valor (vazio "" ou '' é o modelo).
+    expect(tracked.filter((f) => /NEW_RELIC_LICENSE_KEY\s*[=:]\s*["']?[A-Za-z0-9]/.test(read(f)))).toEqual([]);
+  });
+
+  it('NENHUM arquivo versionado, nem os testes, tem uma literal no formato de license key (36 caracteres + NRAL)', () => {
+    // O secret scanning do GitHub abriu alerta por uma chave FALSA de teste nesse formato. Valor
+    // falso de teste é montado em tempo de execução (ex.: 'abcdef0123456789'.repeat(2) + 'abcd' + 'NRAL').
+    expect(allTracked.filter((f) => /[0-9A-Za-z]{36}NRAL/.test(read(f)))).toEqual([]);
   });
 
   it('o CI não usa New Relic (nem chave nem agente)', () => {

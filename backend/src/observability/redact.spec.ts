@@ -1,10 +1,14 @@
 import { REDACTED, Redactor, secretValuesFromEnv } from './redact';
 
+// Chave FALSA montada em tempo de execução: nenhuma literal no repositório tem o formato de uma
+// license key do New Relic (o secret scanning do GitHub a confundiria com uma chave real).
+const FAKE_LICENSE_KEY = 'abcdef0123456789'.repeat(2) + 'abcd' + 'NRAL';
+
 const ENV = {
   JWT_SECRET: 'jwt-segredo-de-teste-com-mais-de-32-caracteres-xyz',
   LDAP_SEARCH_BIND_PASSWORD: 'Ldap#Senha!2026',
   WINRM_PASSWORD: 'WinRM pass com espaço',
-  NEW_RELIC_LICENSE_KEY: 'abcdef0123456789abcdef0123456789abcdNRAL',
+  NEW_RELIC_LICENSE_KEY: FAKE_LICENSE_KEY,
   DATABASE_URL: 'postgresql://rsd_app:Db%40Senha_1@127.0.0.1:5432/rsd?schema=public',
   HOST: '127.0.0.1',
 };
