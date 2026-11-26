@@ -229,6 +229,85 @@ describe('provision-app.ps1 — regras do preparo', () => {
     expect(text).not.toMatch(/coloque o arquivo e rode este script de novo/);
     expect(text).toContain('Download ZIP');
   });
+
+  it('rodar de novo com o runner já registrado não troca a senha da conta rsd-runner', () => {
+    const step8 = codeOf('provision-app.ps1').slice(
+      codeOf('provision-app.ps1').indexOf('Step "8.'),
+      codeOf('provision-app.ps1').indexOf("Step '9."),
+    );
+    // Set-LocalUser -Password só quando o runner ainda vai ser registrado.
+    expect(step8).toMatch(/elseif \(-not \$runnerRegistered -and -not \$SkipRunner\) \{\s*\$runnerPassword = New-RandomSecret\s*Set-LocalUser/);
+    expect(step8.match(/Set-LocalUser/g)).toHaveLength(1);
+    const step12 = codeOf('provision-app.ps1').slice(codeOf('provision-app.ps1').indexOf('Step "12.'));
+    expect(step12).not.toContain('StartPassword');
+  });
+});
+
+// Limites do Windows que a VM pegou só na hora (New-LocalUser -Description com 58 caracteres).
+describe('deploy/*.ps1 — limites de tamanho do Windows', () => {
+  const provision = read('provision-app.ps1');
+  const xml = read('rsd-backend.xml');
+  const literals = (flag: string) =>
+    readdirSync(DEPLOY)
+      .filter((f) => f.endsWith('.ps1'))
+      .flatMap((f) => [...read(f).matchAll(new RegExp(`-${flag}\\s+(?:'([^']*)'|"([^"$]*)")`, 'g'))].map((m) => ({ f, value: m[1] ?? m[2] })));
+
+  it('New-LocalUser / Set-LocalUser: -Description literal com no máximo 48 caracteres', () => {
+    const found = literals('Description');
+    expect(found.length).toBeGreaterThan(0);
+    for (const { f, value } of found) expect({ f, value, length: value.length }).toEqual({ f, value, length: Math.min(value.length, 48) });
+  });
+
+  it('conta do runner: nome padrão com no máximo 20 caracteres e o parâmetro validado (o PowerShell não valida o padrão)', () => {
+    const m = /\[ValidatePattern\('([^']+)'\)\]\[string\]\$RunnerAccount = '([^']+)'/.exec(provision)!;
+    expect(m).not.toBeNull();
+    expect(m[1]).toContain('{1,20}');
+    expect(new RegExp(m[1]).test(m[2])).toBe(true);
+    expect(m[2].length).toBeLessThanOrEqual(20);
+  });
+
+  it('serviço do WinSW: id sem espaço e id/nome dentro do limite de 256 do Windows; runner com o nome da máquina (até 15)', () => {
+    const id = /<id>([^<]+)<\/id>/.exec(xml)![1];
+    const name = /<name>([^<]+)<\/name>/.exec(xml)![1];
+    expect(id).toMatch(/^[A-Za-z0-9._-]{1,256}$/);
+    expect(name.length).toBeLessThanOrEqual(256);
+    expect(provision).toContain('--name $env:COMPUTERNAME');
+  });
+
+  onWindows('com os limites reais das cmdlets', () => {
+    it(
+      'nenhum texto literal passa do [ValidateLength] do parâmetro da cmdlet chamada',
+      () => {
+        const out = runPs(`
+          $errs = @(); $checked = 0
+          foreach ($f in Get-ChildItem -LiteralPath '${DEPLOY}' -Filter *.ps1) {
+            $t = $null; $e = $null
+            $ast = [Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$t, [ref]$e)
+            foreach ($c in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $true)) {
+              $name = $c.GetCommandName(); if (-not $name) { continue }
+              $info = Get-Command -Name $name -CommandType Cmdlet -ErrorAction SilentlyContinue | Select-Object -First 1
+              if (-not $info) { continue }
+              $bound = [Management.Automation.Language.StaticParameterBinder]::BindCommand($c, $true)
+              foreach ($k in @($bound.BoundParameters.Keys)) {
+                $v = $bound.BoundParameters[$k].Value
+                if ($v -isnot [Management.Automation.Language.StringConstantExpressionAst]) { continue }
+                $p = $info.Parameters[$k]; if (-not $p) { continue }
+                foreach ($a in $p.Attributes) {
+                  if ($a -is [Management.Automation.ValidateLengthAttribute]) {
+                    $checked++
+                    if ($v.Value.Length -gt $a.MaxLength) { $errs += ('{0}: {1} -{2} = {3} chars (max {4})' -f $f.Name, $name, $k, $v.Value.Length, $a.MaxLength) }
+                  }
+                }
+              }
+            }
+          }
+          ConvertTo-Json -Compress @{ checked = $checked; errors = @($errs) }`) as { checked: number; errors: string[] };
+        expect(out.errors).toEqual([]);
+        expect(out.checked).toBeGreaterThan(0); // New-LocalUser -Description, ao menos
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+  });
 });
 
 describe('deploy/Caddyfile', () => {

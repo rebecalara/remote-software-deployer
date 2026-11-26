@@ -37,7 +37,8 @@ param(
   [Parameter(Mandatory)][ValidatePattern('^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$')][string]$PublicHost,
   [string]$Repo = 'rebecalara/remote-software-deployer',
   [string]$ServiceAccount = 'RSDDEMO\svc-rsd',
-  [string]$RunnerAccount = 'rsd-runner',
+  # Conta local: o Windows aceita no máximo 20 caracteres (New-LocalUser -Name).
+  [ValidatePattern('^[A-Za-z0-9._-]{1,20}$')][string]$RunnerAccount = 'rsd-runner',
   [string]$RunnerDir = 'C:\actions-runner',
   [string]$ExpectedDomain = 'rsd-demo.local',
   [string]$CaddyfileTarget = 'C:\rsd\caddy\Caddyfile',
@@ -390,15 +391,23 @@ if (-not (Test-Path $P.BackendEnv)) {
 
 # =============================================================================================
 Step "8. Conta local $RunnerAccount e direitos de logon"
-$runnerPassword = New-RandomSecret
+# A senha da conta só é usada ao registrar o runner (passo 12) e não é guardada. Runner já
+# registrado: a senha NÃO é trocada (o serviço do runner continua com a que tem).
+$runnerRegistered = Test-Path (Join-Path $RunnerDir '.runner')
+$runnerPassword = $null
 $runnerUser = Get-LocalUser -Name $RunnerAccount -ErrorAction SilentlyContinue
-$securePw = ConvertTo-SecureString $runnerPassword -AsPlainText -Force
 if (-not $runnerUser) {
-  $null = New-LocalUser -Name $RunnerAccount -Password $securePw -PasswordNeverExpires -UserMayNotChangePassword -AccountNeverExpires -Description 'RSD: runner do GitHub Actions (deploy). Sem administração.'
+  $runnerPassword = New-RandomSecret
+  $securePw = ConvertTo-SecureString $runnerPassword -AsPlainText -Force
+  # Description: no máximo 48 caracteres (limite do New-LocalUser / Set-LocalUser).
+  $null = New-LocalUser -Name $RunnerAccount -Password $securePw -PasswordNeverExpires -UserMayNotChangePassword -AccountNeverExpires -Description 'RSD: runner do GitHub Actions (sem admin)'
   Info "Conta $RunnerAccount criada."
+} elseif (-not $runnerRegistered -and -not $SkipRunner) {
+  $runnerPassword = New-RandomSecret
+  Set-LocalUser -Name $RunnerAccount -Password (ConvertTo-SecureString $runnerPassword -AsPlainText -Force)
+  Info "Conta $RunnerAccount já existe; senha nova para registrar o runner."
 } else {
-  Set-LocalUser -Name $RunnerAccount -Password $securePw
-  Info "Conta $RunnerAccount já existe (senha trocada: o runner é reconfigurado abaixo, se preciso)."
+  Info "Conta $RunnerAccount já existe: senha não alterada."
 }
 $RunnerSid = Resolve-Sid "$env:COMPUTERNAME\$RunnerAccount"
 foreach ($g in @(Get-LocalGroup | Where-Object { Get-LocalGroupMember -Group $_ -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $RunnerSid } })) {
@@ -520,15 +529,17 @@ if ($SkipRunner) {
 } else {
   if (-not (Test-Path $RunnerDir)) { $null = New-Item -ItemType Directory -Path $RunnerDir }
   Set-RsdAcl -Path $RunnerDir -Rules @(@{ Sid = $RunnerSid; Rights = $M })
-  if (Test-Path (Join-Path $RunnerDir '.runner')) {
-    # Já registrado: só atualiza a senha da conta no serviço do runner (trocada no passo 8).
-    $runnerSvc = Get-CimInstance Win32_Service | Where-Object { $_.Name -like 'actions.runner.*' } | Select-Object -First 1
-    if ($runnerSvc) {
-      $null = Invoke-CimMethod -InputObject $runnerSvc -MethodName Change -Arguments @{ StartName = ".\$RunnerAccount"; StartPassword = $runnerPassword }
-      Restart-Service -Name $runnerSvc.Name
-      Info "Runner já registrado; serviço $($runnerSvc.Name) reiniciado."
+  if ($runnerRegistered) {
+    # Já registrado: nada muda (a senha da conta não foi trocada no passo 8). Só garante que roda.
+    $runnerSvc = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $runnerSvc) {
+      Warn "runner registrado em $RunnerDir, mas sem o serviço actions.runner.*: confira à mão."
+    } else {
+      if ($runnerSvc.Status -ne 'Running') { Start-Service -Name $runnerSvc.Name }
+      Info "Runner já registrado; serviço $($runnerSvc.Name) rodando."
     }
   } else {
+    # Senha definida no passo 8 (conta nova, ou senha nova porque o runner ainda não está registrado).
     $zip = Get-VerifiedDownload $Downloads.Runner
     Expand-Archive -LiteralPath $zip -DestinationPath $RunnerDir -Force
     $token = Get-PlainText (Read-Host -AsSecureString "Token de registro do runner (GitHub > Settings > Actions > Runners > New self-hosted runner)")
