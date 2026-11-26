@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
-    "@nestjs/testing": "^11.2.5",
+    "@nestjs/testing": "11.2.9",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.2",
     "jest": "^30.5.2",
@@ -50,10 +50,10 @@
     "typescript": "5.8.3"
   },
   "dependencies": {
-    "@nestjs/common": "^11.2.5",
-    "@nestjs/core": "^11.2.5",
+    "@nestjs/common": "11.2.9",
+    "@nestjs/core": "11.2.9",
     "@nestjs/jwt": "^11.0.2",
-    "@nestjs/platform-express": "^11.2.5",
+    "@nestjs/platform-express": "11.2.9",
     "@prisma/client": "^5.22.0",
     "dotenv": "^18.0.2",
     "ldapjs": "^3.0.7",
@@ -65,6 +65,8 @@
     "newrelic": {
       "ajv": "8.18.0"
     },
-    "fast-uri": "3.1.9"
+    "fast-uri": "3.1.9",
+    "body-parser": "2.4.0",
+    "qs": "6.16.2"
   }
 }
