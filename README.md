@@ -625,6 +625,10 @@ A VM precisa sair pela porta 443 até o New Relic (`collector.newrelic.com`, ou
 - **Valores das consultas ao banco:** ocultos (`record_sql: obfuscated`), sem coleta de SQL lento.
 - **A senha do login** nunca é registrada pelo backend; a senha do WinRM e a do banco também não.
 
+**Taxa de erro do APM:** 401, 403 e 404 não contam como erro (`error_collector.ignore_status_codes`).
+São respostas esperadas — sessão vencida, senha errada, perfil sem permissão —, e os 401/403
+continuam registrados como eventos de segurança. Os 5xx continuam contando.
+
 O agente de navegador (*Browser*) não é usado: exigiria abrir a Content-Security-Policy para script
 e conexão de terceiros, e enviaria as URLs visitadas (com os filtros) para fora.
 

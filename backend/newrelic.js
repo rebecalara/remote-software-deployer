@@ -33,6 +33,11 @@ exports.config = {
   // O erro vai com o tipo e o stack; a mensagem vai pelo log (mascarado), ligada pelo trace.id.
   strip_exception_messages: { enabled: true },
 
+  // 401 (sessão vencida, senha errada), 403 (perfil) e 404 são respostas esperadas, não falhas do
+  // sistema: não contam como erro do APM (não inflam a taxa de erro). Os 401/403 continuam
+  // registrados como eventos de segurança (auth.login, auth.token, authz.forbidden).
+  error_collector: { ignore_status_codes: [401, 403, 404] },
+
   // Valores das consultas do Prisma ocultos; sem coleta de SQL lento.
   transaction_tracer: { record_sql: 'obfuscated' },
   slow_sql: { enabled: false },

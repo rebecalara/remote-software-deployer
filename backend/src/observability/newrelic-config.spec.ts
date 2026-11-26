@@ -63,6 +63,12 @@ describe('backend/newrelic.js', () => {
     expect(config.high_security).toBe(false);
   });
 
+  it('401, 403 e 404 não contam como erro do APM (continuam como eventos de segurança)', () => {
+    expect(config.error_collector).toEqual({ ignore_status_codes: [401, 403, 404] });
+    // 5xx continua contando.
+    expect(config.error_collector.ignore_status_codes.some((c: number) => c >= 500)).toBe(false);
+  });
+
   it('logs no New Relic pelo AppLogger (forwarding ligado, sem mexer no log local)', () => {
     expect(config.application_logging).toEqual({
       enabled: true,
