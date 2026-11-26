@@ -4,10 +4,12 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { configureRequestTimeout } from './http-server.config';
+import { AppLogger } from './observability/app-logger';
 import { formatListenAddress, loadListenAddress } from './listen-address.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Console igual ao do Nest; com o New Relic ligado, cada linha também vai para lá (mascarada).
+  const app = await NestFactory.create(AppModule, { logger: new AppLogger() });
   const logger = new Logger('Bootstrap');
   const timeoutMs = configureRequestTimeout(app.getHttpServer(), logger);
   logger.log(`Tempo máximo por requisição HTTP: ${timeoutMs / 60_000} min.`);
