@@ -241,6 +241,103 @@ describe('provision-app.ps1 — regras do preparo', () => {
     const step12 = codeOf('provision-app.ps1').slice(codeOf('provision-app.ps1').indexOf('Step "12.'));
     expect(step12).not.toContain('StartPassword');
   });
+
+  // Na VM, o rsd-backend ficou em LocalSystem: uma rodada interrompida instalou o serviço sem
+  // aplicar a senha, e a seguinte só pedia a senha se o serviço ainda não existisse.
+  it('serviço: pede a senha sempre que a conta não for a svc-rsd, confere no AD antes e para com erro se não aplicar', () => {
+    const code = codeOf('provision-app.ps1');
+    const step10 = code.slice(code.indexOf('Step "10.'), code.indexOf("Step '11."));
+    expect(step10).toContain('if ($ResetServicePassword -or -not (Test-ServiceRunsAs -Name $script:RsdServiceName -Sid $SvcSid))');
+    expect(step10).not.toMatch(/\$needPassword/);
+    const check = step10.indexOf('Test-DomainCredential');
+    expect(check).toBeGreaterThan(0);
+    expect(check).toBeLessThan(step10.indexOf('-MethodName Change'));
+    // Depois do Change, confere de novo e para com erro se a conta não for a esperada.
+    expect(step10.slice(step10.indexOf('-MethodName Change'))).toMatch(/if \(-not \(Test-ServiceRunsAs[^\n]*\)\) \{\s*throw/);
+  });
+
+  it('runner: o token é lido por Read-RunnerToken (nunca vazio no config.cmd) e o registro é conferido depois', () => {
+    const code = codeOf('provision-app.ps1');
+    const step12 = code.slice(code.indexOf('Step "12.'));
+    expect(step12).toContain('$token = Read-RunnerToken');
+    expect(step12.indexOf('Read-RunnerToken')).toBeLessThan(step12.indexOf('config.cmd --unattended'));
+    expect(step12).not.toMatch(/Read-Host/);
+    expect(step12).toMatch(/if \(-not \(Test-Path \(Join-Path \$RunnerDir '\.runner'\)\) -or -not \$runnerSvc[^\n]*\{\s*throw/);
+  });
+
+  onWindows('funções do preparo no PowerShell de verdade', () => {
+    /** Carrega do provision só as funções pedidas (sem rodar o script), com Info/Warn gravando em $log. */
+    const withFunctions = (names: string[], body: string) => `
+      $tk = $null; $er = $null
+      $ast = [Management.Automation.Language.Parser]::ParseFile('${join(DEPLOY, 'provision-app.ps1')}', [ref]$tk, [ref]$er)
+      foreach ($fn in $ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
+        if (@(${names.map((n) => `'${n}'`).join(',')}) -contains $fn.Name) { Invoke-Expression $fn.Extent.Text }
+      }
+      $log = New-Object Collections.Generic.List[string]
+      function Info([string]$t) { $log.Add('INFO ' + $t) }
+      function Warn([string]$t) { $log.Add('WARN ' + $t) }
+      ${body}`;
+    const token = 'AABBCCDDEEFF00112233445566';
+    const readToken = (inputs: string[]) =>
+      runPs(
+        withFunctions(
+          ['Get-PlainText', 'Read-RunnerToken'],
+          `$queue = New-Object Collections.Generic.Queue[string]
+          ${inputs.map((i) => `$queue.Enqueue('${i.replace(/'/g, "''")}')`).join('; ')}
+          function Read-Host { param([string]$Prompt, [switch]$AsSecureString)
+            $v = $queue.Dequeue(); $s = New-Object Security.SecureString; foreach ($ch in $v.ToCharArray()) { $s.AppendChar($ch) }; $s }
+          try { $r = Read-RunnerToken; $err = $null } catch { $r = $null; $err = $_.Exception.Message }
+          ConvertTo-Json -Compress @{ token = $r; error = $err; log = @($log); left = $queue.Count }`,
+        ),
+      ) as { token: string | null; error: string | null; log: string[]; left: number };
+
+    it(
+      'Read-RunnerToken: tira espaço e quebra de linha das pontas e mostra só o tamanho',
+      () => {
+        const r = readToken([`  ${token}\r\n`]);
+        expect(r.token).toBe(token);
+        expect(r.log).toEqual([`INFO Token lido: ${token.length} caracteres.`]);
+        expect(JSON.stringify(r.log)).not.toContain(token);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'Read-RunnerToken: vazio ou com espaço no meio pede de novo; 3 vezes sem token = erro, sem chamar o config.cmd',
+      () => {
+        const ok = readToken(['', `--token ${token}`, token]);
+        expect(ok.token).toBe(token);
+        expect(ok.log.filter((l) => l.startsWith('WARN'))).toHaveLength(2);
+        expect(JSON.stringify(ok.log)).not.toContain(token);
+        const fail = readToken(['', '   ', '\r\n']);
+        expect(fail.token).toBeNull();
+        expect(fail.error).toMatch(/não lido em 3 tentativas/);
+        expect(fail.log.filter((l) => l.startsWith('INFO'))).toEqual(Array(3).fill('INFO Token lido: 0 caracteres.'));
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'Test-ServiceRunsAs: LocalSystem, conta diferente e serviço inexistente contam como "não"',
+      () => {
+        const out = runPs(
+          withFunctions(
+            ['Resolve-Sid', 'Test-ServiceRunsAs'],
+            `$me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+            $localService = New-Object Security.Principal.SecurityIdentifier('S-1-5-19')
+            ConvertTo-Json -Compress @{
+              same = (Test-ServiceRunsAs -Name 'EventLog' -Sid $localService)
+              localSystem = (Test-ServiceRunsAs -Name 'Winmgmt' -Sid $me)
+              missing = (Test-ServiceRunsAs -Name 'rsd-nao-existe-123' -Sid $me)
+            }`,
+          ),
+        ) as { same: boolean; localSystem: boolean; missing: boolean };
+        // EventLog roda como NT AUTHORITY\LocalService (S-1-5-19): controle positivo.
+        expect(out).toEqual({ same: true, localSystem: false, missing: false });
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+  });
 });
 
 // Limites do Windows que a VM pegou só na hora (New-LocalUser -Description com 58 caracteres).
@@ -304,6 +401,44 @@ describe('deploy/*.ps1 — limites de tamanho do Windows', () => {
           ConvertTo-Json -Compress @{ checked = $checked; errors = @($errs) }`) as { checked: number; errors: string[] };
         expect(out.errors).toEqual([]);
         expect(out.checked).toBeGreaterThan(0); // New-LocalUser -Description, ao menos
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    // Na VM: "A parameter cannot be found that matches parameter name 'Filter'" no
+    // Invoke-CimMethod do passo 10, logo depois da senha — o parser não pega, só a execução.
+    it(
+      'todo parâmetro nomeado existe na cmdlet chamada, e todo comando existe (cmdlet, programa ou função dos scripts)',
+      () => {
+        const out = runPs(`
+          $errs = New-Object Collections.Generic.List[string]; $checked = 0
+          $files = @(Get-ChildItem -LiteralPath '${DEPLOY}' -Filter *.ps1)
+          $asts = @{}; $ownFunctions = @{}
+          foreach ($f in $files) {
+            $t = $null; $e = $null
+            $asts[$f.Name] = [Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$t, [ref]$e)
+            foreach ($fn in $asts[$f.Name].FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) { $ownFunctions[$fn.Name] = $true }
+          }
+          foreach ($fname in $asts.Keys) {
+            foreach ($c in $asts[$fname].FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $true)) {
+              $name = $c.GetCommandName()
+              if (-not $name -or $name.Contains('\\') -or $ownFunctions.ContainsKey($name)) { continue }
+              $any = Get-Command -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
+              if (-not $any) { $errs.Add(('{0}: comando {1} não existe' -f $fname, $name)); continue }
+              if ($any.CommandType -eq 'Alias') { $any = $any.ResolvedCommand }
+              if ($any.CommandType -ne 'Cmdlet') { continue }
+              foreach ($p in @($c.CommandElements | Where-Object { $_ -is [Management.Automation.Language.CommandParameterAst] })) {
+                $checked++
+                $pn = $p.ParameterName
+                $match = @($any.Parameters.Values | Where-Object { $_.Name -eq $pn -or $_.Aliases -contains $pn })
+                if ($match.Count -eq 0) { $match = @($any.Parameters.Values | Where-Object { $_.Name -like ($pn + '*') }) }
+                if ($match.Count -ne 1) { $errs.Add(('{0}:{1} {2} -{3}: parâmetro não existe' -f $fname, $p.Extent.StartLineNumber, $any.Name, $pn)) }
+              }
+            }
+          }
+          ConvertTo-Json -Compress @{ checked = $checked; errors = @($errs) }`) as { checked: number; errors: string[] };
+        expect(out.errors).toEqual([]);
+        expect(out.checked).toBeGreaterThan(100);
       },
       REAL_POWERSHELL_TEST_TIMEOUT_MS,
     );

@@ -190,6 +190,39 @@ function Get-PlainText([Security.SecureString]$Secure) {
   try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
 }
 
+# Conta configurada no serviço (Win32_Service.StartName) é a esperada? Pelo SID; LocalSystem e
+# nomes que não resolvem contam como "não".
+function Test-ServiceRunsAs {
+  param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][Security.Principal.SecurityIdentifier]$Sid)
+  $svc = Get-CimInstance Win32_Service -Filter "Name='$Name'"
+  if (-not $svc -or -not $svc.StartName) { return $false }
+  $startName = $svc.StartName
+  try { return (Resolve-Sid $startName).Value -eq $Sid.Value } catch { return $false }
+}
+
+# Confere usuário e senha no AD (bind Kerberos/NTLM), sem guardar nada. Uma tentativa por chamada.
+# System.DirectoryServices.AccountManagement faz parte do .NET Framework: não depende do módulo
+# ActiveDirectory (RSAT), que a APP-RSD não tem.
+function Test-DomainCredential {
+  param([Parameter(Mandatory)][string]$Account, [Parameter(Mandatory)][string]$Domain, [Parameter(Mandatory)][Security.SecureString]$Password)
+  Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+  $ctx = New-Object DirectoryServices.AccountManagement.PrincipalContext([DirectoryServices.AccountManagement.ContextType]::Domain, $Domain)
+  try { return $ctx.ValidateCredentials(($Account -split '\\')[-1], (Get-PlainText $Password)) } finally { $ctx.Dispose() }
+}
+
+# Token de registro do runner: colado no prompt (pode vir com espaço ou quebra de linha nas pontas,
+# ou não vir nada se a colagem não chegou ao prompt). Mostra só o tamanho, nunca o valor.
+function Read-RunnerToken {
+  for ($try = 1; $try -le 3; $try++) {
+    $token = (Get-PlainText (Read-Host -AsSecureString 'Token de registro do runner (GitHub > Settings > Actions > Runners > New self-hosted runner)')).Trim()
+    Info "Token lido: $($token.Length) caracteres."
+    if ($token -match '^[A-Za-z0-9_-]{20,}$') { return $token }
+    if ($token.Length -eq 0) { Warn 'nada foi lido. No console, cole com o botão direito ou Ctrl+V e confira que o cursor estava no prompt.' }
+    else { Warn 'o token tem só letras e números, sem espaço (cole só o valor depois de --token).' }
+  }
+  throw 'Token do runner não lido em 3 tentativas. Nada foi registrado; rode o preparo de novo.'
+}
+
 # Executa SQL como o superusuário "postgres", a partir de um arquivo temporário só de administrador
 # (as senhas nunca vão para a linha de comando).
 function Invoke-PgSql {
@@ -449,17 +482,33 @@ if (-not $xml.Contains($caLine)) { throw 'deploy\rsd-backend.xml sem a linha RSD
 $xml = $xml.Replace($caLine, $(if (Test-Path $P.CaPem) { "  <env name=`"NODE_EXTRA_CA_CERTS`" value=`"$($P.CaPem)`"/>" } else { '  <!-- NODE_EXTRA_CA_CERTS: sem C:\rsd\config\rsd-ca.pem -->' }))
 [IO.File]::WriteAllText((Join-Path $P.Service 'rsd-backend.xml'), $xml, (New-Object Text.UTF8Encoding($false)))
 $svc = Get-Service -Name $script:RsdServiceName -ErrorAction SilentlyContinue
-$needPassword = $ResetServicePassword
 if (-not $svc) {
   Invoke-Checked -Exe $svcExe -Arguments @('install')
-  $needPassword = $true
   Info 'Serviço instalado.'
 }
-if ($needPassword) {
+# O serviço TEM de rodar como $ServiceAccount: se o StartName for outro (ex.: LocalSystem, que o
+# WinSW usa ao instalar, ou uma rodada anterior interrompida antes de aplicar a senha), a senha é
+# pedida e aplicada. Comparação pelo SID (o Windows pode guardar o nome com outra grafia).
+if ($ResetServicePassword -or -not (Test-ServiceRunsAs -Name $script:RsdServiceName -Sid $SvcSid)) {
+  $current = (Get-CimInstance Win32_Service -Filter "Name='$($script:RsdServiceName)'").StartName
+  Info "O serviço está com a conta '$current'; vai rodar como $ServiceAccount."
   $svcPassword = Read-Host -AsSecureString "Senha da conta $ServiceAccount (não é guardada em arquivo)"
-  $r = Invoke-CimMethod -ClassName Win32_Service -Filter "Name='$($script:RsdServiceName)'" -MethodName Change -Arguments @{ StartName = $ServiceAccount; StartPassword = (Get-PlainText $svcPassword) }
+  if ($svcPassword.Length -eq 0) { throw "Senha vazia (nada foi colado?). Serviço não alterado; rode o preparo de novo." }
+  # O Windows não confere a senha ao configurar o serviço (só ao iniciar, com erro 1069): confere no AD antes.
+  if (-not (Test-DomainCredential -Account $ServiceAccount -Domain $ExpectedDomain -Password $svcPassword)) {
+    throw "O AD recusou a senha de $ServiceAccount. Serviço não alterado; rode o preparo de novo."
+  }
+  # Invoke-CimMethod não tem -Filter: o método é chamado na instância do serviço (-InputObject).
+  $svcCim = Get-CimInstance Win32_Service -Filter "Name='$($script:RsdServiceName)'"
+  $r = Invoke-CimMethod -InputObject $svcCim -MethodName Change -Arguments @{ StartName = $ServiceAccount; StartPassword = (Get-PlainText $svcPassword) }
+  $svcPassword.Dispose(); $svcPassword = $null
   if ($r.ReturnValue -ne 0) { throw "Não foi possível configurar a conta do serviço (Win32_Service.Change = $($r.ReturnValue))." }
-  Info "Serviço configurado para rodar como $ServiceAccount."
+  if (-not (Test-ServiceRunsAs -Name $script:RsdServiceName -Sid $SvcSid)) {
+    throw "O serviço $($script:RsdServiceName) continua sem rodar como $ServiceAccount depois da configuração."
+  }
+  Info "Serviço configurado para rodar como $ServiceAccount (senha conferida no AD)."
+} else {
+  Info "Serviço já roda como $ServiceAccount."
 }
 # O rsd-runner só consulta (LC, RC, LO), inicia (RP) e para (WP) ESTE serviço.
 $sddl = ((& sc.exe sdshow $script:RsdServiceName) -join '').Trim()
@@ -533,7 +582,7 @@ if ($SkipRunner) {
     # Já registrado: nada muda (a senha da conta não foi trocada no passo 8). Só garante que roda.
     $runnerSvc = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $runnerSvc) {
-      Warn "runner registrado em $RunnerDir, mas sem o serviço actions.runner.*: confira à mão."
+      throw "Runner registrado em $RunnerDir, mas sem o serviço actions.runner.*. Remova o registro (cd $RunnerDir; .\config.cmd remove --token <token de remoção do GitHub>) e rode o preparo de novo."
     } else {
       if ($runnerSvc.Status -ne 'Running') { Start-Service -Name $runnerSvc.Name }
       Info "Runner já registrado; serviço $($runnerSvc.Name) rodando."
@@ -542,14 +591,20 @@ if ($SkipRunner) {
     # Senha definida no passo 8 (conta nova, ou senha nova porque o runner ainda não está registrado).
     $zip = Get-VerifiedDownload $Downloads.Runner
     Expand-Archive -LiteralPath $zip -DestinationPath $RunnerDir -Force
-    $token = Get-PlainText (Read-Host -AsSecureString "Token de registro do runner (GitHub > Settings > Actions > Runners > New self-hosted runner)")
+    # Vazio nunca chega ao config.cmd: o PowerShell 5.1 descarta argumento vazio, e o runner
+    # responderia "Invalid configuration provided for token".
+    $token = Read-RunnerToken
     Push-Location $RunnerDir
     try {
       & .\config.cmd --unattended --url "https://github.com/$Repo" --token $token --name $env:COMPUTERNAME `
         --labels 'rsd-app' --work '_work' --runasservice --windowslogonaccount ".\$RunnerAccount" --windowslogonpassword $runnerPassword --replace
-      if ($LASTEXITCODE -ne 0) { throw 'config.cmd do runner falhou.' }
-    } finally { Pop-Location }
-    Info 'Runner registrado (labels: self-hosted, Windows, X64, rsd-app) e rodando como serviço.'
+      if ($LASTEXITCODE -ne 0) { throw "config.cmd do runner falhou (código $LASTEXITCODE). Veja $RunnerDir\_diag; rodar o preparo de novo é seguro." }
+    } finally { Pop-Location; $token = $null }
+    $runnerSvc = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not (Test-Path (Join-Path $RunnerDir '.runner')) -or -not $runnerSvc -or $runnerSvc.Status -ne 'Running') {
+      throw "config.cmd terminou, mas o runner não ficou registrado e rodando como serviço. Veja $RunnerDir\_diag."
+    }
+    Info "Runner registrado (labels: self-hosted, Windows, X64, rsd-app); serviço $($runnerSvc.Name) rodando."
   }
 }
 
