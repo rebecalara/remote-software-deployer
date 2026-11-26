@@ -258,6 +258,60 @@ function Invoke-ReleaseSwitch {
     Message = "Rollback para $previous também falhou no health check: intervenção manual (rollback.ps1, logs em C:\rsd\logs)." }
 }
 
+# SQL que lista o que falta ao rsd_app: tabela sem SELECT, INSERT, UPDATE ou DELETE e sequência
+# sem USAGE. Resultado vazio = tudo certo. Roda como rsd_owner (has_*_privilege só consulta).
+function Get-AppGrantProblemsSql {
+  return @'
+SELECT coalesce(string_agg(item, ', ' ORDER BY item), '') FROM (
+  SELECT format('%I.%I (%s)', t.schemaname, t.tablename, p.priv) AS item
+    FROM pg_tables t CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(priv)
+   WHERE t.schemaname = 'public'
+     AND NOT has_table_privilege('rsd_app', format('%I.%I', t.schemaname, t.tablename), p.priv)
+  UNION ALL
+  SELECT format('%I.%I (USAGE)', s.sequence_schema, s.sequence_name)
+    FROM information_schema.sequences s
+   WHERE s.sequence_schema = 'public'
+     AND NOT has_sequence_privilege('rsd_app', format('%I.%I', s.sequence_schema, s.sequence_name), 'USAGE')
+) problems;
+'@
+}
+
+# SQL que o rsd_app roda para provar que lê e grava em cada tabela, sem mudar nenhuma linha:
+# SELECT, INSERT...SELECT...WHERE false, UPDATE...WHERE false e DELETE...WHERE false, numa
+# transação desfeita. Imprime "OK <n> tabelas" ou levanta erro com a tabela e a operação.
+function Get-AppWriteCheckSql {
+  return @'
+BEGIN;
+DO $$
+DECLARE
+  t record; col text; n int := 0; failures text[] := '{}';
+BEGIN
+  FOR t IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename LOOP
+    SELECT quote_ident(column_name) INTO col FROM information_schema.columns
+     WHERE table_schema = t.schemaname AND table_name = t.tablename ORDER BY ordinal_position LIMIT 1;
+    BEGIN
+      EXECUTE format('SELECT 1 FROM %I.%I LIMIT 1', t.schemaname, t.tablename);
+      EXECUTE format('INSERT INTO %I.%I SELECT * FROM %I.%I WHERE false', t.schemaname, t.tablename, t.schemaname, t.tablename);
+      EXECUTE format('UPDATE %I.%I SET %s = %s WHERE false', t.schemaname, t.tablename, col, col);
+      EXECUTE format('DELETE FROM %I.%I WHERE false', t.schemaname, t.tablename);
+      n := n + 1;
+    EXCEPTION WHEN insufficient_privilege THEN
+      failures := failures || format('%I.%I: %s', t.schemaname, t.tablename, SQLERRM);
+    END;
+  END LOOP;
+  IF n = 0 THEN RAISE EXCEPTION 'Nenhuma tabela encontrada no schema public.'; END IF;
+  IF array_length(failures, 1) > 0 THEN RAISE EXCEPTION 'Sem permissão: %', array_to_string(failures, '; '); END IF;
+  RAISE NOTICE 'tabelas conferidas: %', n;
+  PERFORM set_config('rsd.checked', n::text, true);
+END $$;
+SELECT 'OK ' || current_setting('rsd.checked') || ' tabelas'
+  || CASE WHEN EXISTS (SELECT 1 FROM information_schema.sequences s WHERE s.sequence_schema = 'public'
+       AND NOT has_sequence_privilege(format('%I.%I', s.sequence_schema, s.sequence_name), 'USAGE'))
+     THEN ' — FALTA USAGE em sequência' ELSE '' END;
+ROLLBACK;
+'@
+}
+
 # URL do Prisma -> partes para o pg_dump, com a senha separada (vai por PGPASSWORD, não pela linha
 # de comando).
 function Split-PgUrl {

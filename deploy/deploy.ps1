@@ -99,6 +99,23 @@ try {
     Pop-Location
   }
 
+  # ------------------------------------------------------------------ 3b. permissões do rsd_app
+  # Tabelas e sequências criadas pelas migrações herdam as permissões padrão (provision); se
+  # faltar alguma, o backend quebraria em produção — para aqui, sem trocar a versão.
+  $grantSql = Join-Path ([IO.Path]::GetTempPath()) ("rsd-grants-{0}.sql" -f [guid]::NewGuid())
+  [IO.File]::WriteAllText($grantSql, (Get-AppGrantProblemsSql))
+  $env:PGPASSWORD = $db.Password
+  try {
+    $problems = & (Join-Path $cfg['PG_BIN'] 'psql.exe') -X -q -t -A -v ON_ERROR_STOP=1 --host $db.Host --port $db.Port --username $db.User --dbname $db.Database --no-password -f $grantSql
+    if ($LASTEXITCODE -ne 0) { throw "Conferência das permissões do rsd_app falhou (psql $LASTEXITCODE)." }
+  } finally {
+    Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $grantSql -Force -ErrorAction SilentlyContinue
+  }
+  $problems = (($problems | Out-String).Trim())
+  if ($problems) { throw "O papel rsd_app não tem permissão em: $problems. A versão no ar NÃO foi trocada; rode o provision-app.ps1 (permissões padrão) e repita o deploy." }
+  Write-RsdLog 'Permissões do rsd_app conferidas em todas as tabelas e sequências.'
+
   # ------------------------------------------------------------------ 4. troca + health check
   $result = Invoke-ReleaseSwitch -Paths $P -NewRelease $name `
     -Stop { Stop-RsdService } -Start { Start-Service -Name $script:RsdServiceName } -Health { Test-BackendHealth }

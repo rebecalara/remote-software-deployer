@@ -513,3 +513,37 @@ onWindows('troca de versão, rollback e health check (PowerShell de verdade, sem
     T,
   );
 });
+
+describe('permissões do rsd_app — conferência em todo deploy e prova prática', () => {
+  it('o deploy confere as permissões DEPOIS da migração e ANTES da troca de versão', () => {
+    const code = codeOf('deploy.ps1');
+    const migrate = code.indexOf("Invoke-Native 'prisma migrate deploy'");
+    const grants = code.indexOf('Get-AppGrantProblemsSql');
+    const swap = code.indexOf('Invoke-ReleaseSwitch');
+    expect(grants).toBeGreaterThan(migrate);
+    expect(swap).toBeGreaterThan(grants);
+    expect(code).toContain('O papel rsd_app não tem permissão em: $problems. A versão no ar NÃO foi trocada');
+  });
+
+  it('conferência do deploy: SELECT, INSERT, UPDATE e DELETE em cada tabela e USAGE em cada sequência', () => {
+    const common = read('rsd-deploy-common.ps1');
+    const sql = common.slice(common.indexOf('function Get-AppGrantProblemsSql'), common.indexOf('function Get-AppWriteCheckSql'));
+    expect(sql).toContain("(VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'))");
+    expect(sql).toContain("has_sequence_privilege('rsd_app'");
+  });
+
+  it('prova prática: como rsd_app, numa transação desfeita, sem mudar linha nem sequência', () => {
+    const common = read('rsd-deploy-common.ps1');
+    const sql = common.slice(common.indexOf('function Get-AppWriteCheckSql'), common.indexOf('function Split-PgUrl'));
+    expect(sql.trim()).toMatch(/^function Get-AppWriteCheckSql \{\s*return @'\s*BEGIN;/);
+    expect(sql).toMatch(/ROLLBACK;\s*'@/);
+    for (const stmt of ['INSERT INTO %I.%I SELECT * FROM %I.%I WHERE false', 'UPDATE %I.%I SET %s = %s WHERE false', 'DELETE FROM %I.%I WHERE false']) {
+      expect(sql).toContain(stmt);
+    }
+    expect(sql).not.toMatch(/nextval|setval/);
+    const check = read('check-db-grants.ps1');
+    expect(check).toContain("if ($db.User -ne 'rsd_app')");
+    expect(check).toContain('Read-EnvFile $P.BackendEnv');
+    expect(check).toMatch(/-match 'FALTA'/);
+  });
+});
