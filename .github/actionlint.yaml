@@ -1,0 +1,4 @@
+# Labels do runner self-hosted da APP-RSD (job "deploy"), para o actionlint não acusá-las.
+self-hosted-runner:
+  labels:
+    - rsd-app

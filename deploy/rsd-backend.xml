@@ -1,0 +1,35 @@
+<!--
+  Serviço do backend do RSD no Windows (WinSW 2.12.0). O provision-app.ps1 copia este modelo
+  para C:\rsd\service\rsd-backend.xml e instala o serviço com a conta RSDDEMO\svc-rsd (a senha
+  é digitada na hora e fica só no Gerenciador de Serviços do Windows, nunca neste arquivo).
+  O deploy só troca a junção C:\rsd\app\current e reinicia o serviço: este arquivo não muda.
+-->
+<service>
+  <id>rsd-backend</id>
+  <name>RSD Backend</name>
+  <description>Remote Software Deployer: backend (NestJS) em 127.0.0.1:3000, atrás do Caddy.</description>
+
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>dist\main.js</arguments>
+  <workingdirectory>C:\rsd\app\current\backend</workingdirectory>
+
+  <!-- Segredos ficam em C:\rsd\config\backend.env (lido pelo dotenv do main.ts). -->
+  <env name="NODE_ENV" value="production"/>
+  <env name="DOTENV_CONFIG_PATH" value="C:\rsd\config\backend.env"/>
+  <env name="DOTENV_CONFIG_QUIET" value="true"/>
+  <!-- RSD_CA_CERTS: o provision troca esta linha por NODE_EXTRA_CA_CERTS só se C:\rsd\config\rsd-ca.pem existir. -->
+
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+
+  <logpath>C:\rsd\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

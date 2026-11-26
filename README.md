@@ -399,12 +399,183 @@ O GitHub Actions (`.github/workflows/ci.yml`) roda a cada push e pull request em
    pulados.
 2. **SonarCloud**, depois dos dois: análise estática e a cobertura dos dois lados. Sem o
    token (PR de fork), a análise é pulada.
+3. **Deploy**, só em push na `main` e depois do backend e do frontend passarem: ver
+   [Deploy em produção](#deploy-em-produção).
 
-Um teste ou build que falha deixa o job vermelho. O Quality Gate aparece no SonarCloud e no
-badge, mas não bloqueia o pipeline: a regra padrão pede 80% de cobertura no código novo, e o
-frontend está em ~32%. A regra será revista depois da release.
+Um teste ou build que falha deixa o job vermelho (e, na `main`, não há deploy). O Quality Gate
+aparece no SonarCloud e no badge, mas não bloqueia o pipeline: a regra padrão pede 80% de
+cobertura no código novo, e o frontend está em ~32%. A regra será revista depois da release.
 
-O deploy não faz parte deste pipeline.
+## Deploy em produção
+
+A `main` vai para produção sozinha: cada push nela (o merge de um PR, já que a `main` é
+protegida) roda os testes e, se passarem, o job **deploy** publica a versão na VM **APP-RSD**
+(Windows Server 2022, no domínio), atrás do Caddy (HTTPS). Não há deploy manual. O histórico
+de cada publicação fica no GitHub, em *Deployments* → `production`.
+
+### Preparo × deploy
+
+| | Preparo da VM | Deploy |
+|---|---|---|
+| Script | [`deploy/provision-app.ps1`](deploy/provision-app.ps1) | [`deploy/deploy.ps1`](deploy/deploy.ps1) |
+| Quem roda | administrador, à mão, uma vez (pode rodar de novo: só confere e completa) | o GitHub Actions, a cada push na `main` |
+| Com que conta | administrador | `rsd-runner` (conta local, sem administração) |
+| O que faz | Node, Git e PostgreSQL nas versões exatas (hash e assinatura conferidos); banco e papéis; pastas e permissões; serviço `rsd-backend`; Caddyfile; runner | build do backend, backup, migrações, troca de versão, health check, rollback |
+
+**Rodar o preparo** (PowerShell como administrador, na APP-RSD):
+
+- **Na primeira vez a VM ainda não tem Git**: baixe o código pelo GitHub (branch `dev` → *Code*
+  → *Download ZIP*), extraia e desbloqueie os arquivos — o Windows marca o que veio da internet,
+  e o PowerShell recusaria os scripts:
+
+  ```powershell
+  Expand-Archive .\remote-software-deployer-dev.zip -DestinationPath C:\rsd\setup\repo
+  Get-ChildItem -Recurse C:\rsd\setup\repo | Unblock-File
+  cd C:\rsd\setup\repo\remote-software-deployer-dev
+  .\deploy\provision-app.ps1 -PublicHost rsd-demo-rebeca.chilecentral.cloudapp.azure.com
+  ```
+
+- **Depois** (o preparo instala o Git), para rodar de novo: `git clone` do repositório e o mesmo
+  comando. O script é idempotente: só confere e completa o que falta.
+
+Durante o preparo, você digita a senha da `RSDDEMO\svc-rsd` e cola o token de registro do runner
+(*Settings → Actions → Runners → New self-hosted runner*; vale 1 hora). No fim, o resumo diz o
+que falta preencher no `C:\rsd\config\backend.env` (`JWT_SECRET` e LDAP).
+
+**Contas e papéis**, cada um com o mínimo:
+
+- `RSDDEMO\svc-rsd` roda o backend (serviço `rsd-backend`, pelo [WinSW](deploy/rsd-backend.xml)) e é
+  a identidade do WinRM nas estações. Lê `C:\rsd\config\backend.env` e grava os instaladores.
+- `rsd-runner` roda o runner do GitHub Actions. Grava só em `C:\rsd\app`, nos backups e nos logs;
+  lê só o `C:\rsd\config\deploy.env`; consulta, inicia e para **só** o serviço do RSD. Não tem
+  logon local, por RDP nem pela rede, e não enxerga os instaladores nem o `backend.env`.
+- No banco, `rsd_owner` faz as migrações (credencial no `deploy.env`) e `rsd_app`, o do backend,
+  só lê e grava dados (no `backend.env`). As tabelas que as migrações criarem já nascem com as
+  permissões do `rsd_app` (`ALTER DEFAULT PRIVILEGES`, no preparo).
+
+Nenhum segredo fica no repositório: as senhas são geradas na própria VM (banco) ou digitadas
+na hora (conta do serviço, token do runner) e não são guardadas em arquivo.
+
+### O que acontece em cada deploy
+
+1. **Versão nova** em `C:\rsd\app\releases\<data>-<sha7>`: o backend é compilado na VM (`npm ci`,
+   `prisma generate`, `nest build` — o motor do Prisma precisa ser o do Windows); o frontend é o
+   build que passou nos testes do CI.
+2. **Backup** do banco (`pg_dump`) em `C:\rsd\data\backups\rsd-antes-deploy-<data>-<sha7>.dump`.
+3. **Migrações** (`prisma migrate deploy`). Se falharem, o deploy para e a versão no ar
+   continua a mesma.
+4. **Permissões do `rsd_app`** conferidas em todas as tabelas e sequências. Se faltar alguma, o
+   deploy para sem trocar a versão.
+5. **Troca:** o serviço para, `C:\rsd\app\current` (uma junção) passa a apontar para a versão nova,
+   o serviço sobe e `http://127.0.0.1:3000/health` tem de responder `{ "status": "ok" }` em até 60 s.
+6. **Site pelo Caddy:** confere `https://<domínio>/` e `/api/health`. De dentro da VM, o domínio
+   público pode não responder (rede do Azure); aí confere pelo Caddy local. Isso só gera aviso:
+   quem decide o rollback é o health check do backend.
+7. **Limpeza:** ficam as últimas 5 versões e os últimos 10 backups de deploy. Os instaladores
+   (`C:\rsd\data\installers`) nunca são tocados.
+
+### Rollback
+
+**Automático:** se o backend não passar no health check depois da troca (ou nem subir), o deploy
+volta sozinho para a versão anterior, confere de novo e termina com o job vermelho, explicando
+o que aconteceu no resumo do job.
+
+**O rollback volta o código, não o banco.** Se a migração já rodou, a versão anterior passa a
+rodar sobre o schema novo. Isso é seguro porque as migrações do RSD **só acrescentam** (coluna
+nova opcional, índice, restrição que os dados já cumprem). Regra para o futuro: apagar ou
+renomear algo vai em duas releases — primeiro a versão que para de usar, depois a migração que
+remove.
+
+**Voltar uma versão à mão**, na APP-RSD, como administrador:
+
+```powershell
+.\deploy\rollback.ps1 -List          # versões guardadas (* = no ar)
+.\deploy\rollback.ps1                # volta para a anterior à que está no ar
+.\deploy\rollback.ps1 -To 1a2b3c4    # para uma versão pelo SHA do commit
+```
+
+Também dá para repetir o deploy de um commit antigo pelo GitHub (*Actions* → a execução daquele
+commit → *Re-run jobs*): ele refaz o build daquele commit, e as migrações já aplicadas são
+ignoradas.
+
+**Restaurar o banco** (só se uma migração tiver estragado dados — apaga o que foi gravado
+depois do backup):
+
+```powershell
+Stop-Service rsd-backend
+& 'C:\Program Files\PostgreSQL\18\bin\pg_restore.exe' --clean --if-exists --no-owner `
+  --role=rsd_owner --host 127.0.0.1 --username rsd_owner --dbname rsd `
+  'C:\rsd\data\backups\rsd-antes-deploy-<data>-<sha7>.dump'
+.\deploy\rollback.ps1 -To <sha da versão que combinava com esse banco>
+```
+
+Depois do primeiro deploy (e quando quiser conferir), `.\deploy\check-db-grants.ps1` prova, como
+`rsd_app` e sem mudar nenhuma linha, que o backend lê e grava em todas as tabelas.
+
+### Usuários
+
+O login nunca cria usuário: depois do bind no AD, ele procura o nome digitado, em minúsculas, na
+tabela `User`. Depois do primeiro deploy (que cria as tabelas), cadastre cada pessoa uma vez, como
+administrador na APP-RSD:
+
+```powershell
+.\deploy\add-user.ps1 -Username rebeca   -DisplayName 'Rebeca Lara' -Role ADMIN
+.\deploy\add-user.ps1 -Username operador -DisplayName 'Operador'    -Role OPERATOR
+.\deploy\add-user.ps1 -Username leitor   -DisplayName 'Leitor'      -Role VIEWER
+```
+
+- `-Username` é o que a pessoa digita no login, sem o domínio: o `LDAP_BIND_DN_TEMPLATE`
+  (`{{username}}@rsd-demo.local`) acrescenta o `@rsd-demo.local`. Só minúsculas, números, `.`,
+  `_` e `-`.
+- Conecta como `rsd_app` (a senha vem do `backend.env`) e confere os dados antes de tocar no banco.
+- Pode rodar de novo: um usuário que já existe não é alterado. O script mostra a linha como está e
+  avisa se o papel ou o nome forem diferentes do pedido.
+
+### Runner self-hosted num repositório público
+
+O runner roda na própria APP-RSD. O risco: num pull request, o workflow que roda é o da branch
+do PR, e alguém de fora poderia tentar usar o runner para rodar código na VM. Mitigações:
+
+- **Settings → Actions → General → "Require approval for all external contributors"**:
+  nenhum workflow de quem não é colaborador roda sem aprovação.
+- A `main` é protegida (PR obrigatório, checks do backend e do frontend), e o environment
+  `production` só aceita a `main`.
+- O único job self-hosted roda só em push na `main`, com labels próprias (`rsd-app`); os
+  outros jobs rodam no Ubuntu do GitHub.
+- O `rsd-runner` não é administrador, não lê os instaladores nem os segredos do backend e
+  controla só o serviço do RSD. O job não usa nenhum secret do GitHub.
+
+O que continua: quem tem permissão de escrita no repositório (os colegas do PAC) roda
+workflows sem aprovação. A confiança nesses colaboradores é o limite; eliminar isso por
+completo exigiria um repositório privado ou uma organização com grupos de runners restritos.
+
+### Caddy
+
+O [`deploy/Caddyfile`](deploy/Caddyfile) é versionado, mas **não** é aplicado pelo deploy: o Caddy
+roda como SYSTEM, e dar ao runner permissão no Caddyfile seria dar a ele um caminho para ler
+qualquer arquivo. Quem aplica é o `provision-app.ps1`, rodado por administrador:
+
+1. troca o marcador `__RSD_PUBLIC_HOST__` pelo domínio passado em `-PublicHost`;
+2. `caddy validate` (se recusar, nada muda);
+3. guarda o Caddyfile anterior (`C:\rsd\caddy\Caddyfile.bak-<data>`), copia o novo e
+   **reinicia o serviço `caddy`** — com `admin off` não há API de administração, então também não
+   há `caddy reload`;
+4. se o Caddy não ficar no ar (serviço parado ou porta 443 fechada), volta o anterior.
+
+O que o Caddyfile faz: HTTPS automático no domínio, `encode zstd gzip`, `/api/*` para o backend
+em `127.0.0.1:3000`, o frontend da versão no ar (`C:\rsd\app\current\frontend`), cache longo nos
+`/assets` e `no-cache` nas páginas, envio de até 600 MB e os cabeçalhos de segurança: HSTS,
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e a **Content-Security-Policy**:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:;
+connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+Ela foi conferida contra o que o frontend realmente carrega. Não há script nem estilo inline, as
+fontes são locais (o CSS traz alguns subconjuntos em `data:`), as imagens são locais e as
+chamadas vão só para `/api`. Com a política ligada, todas as telas funcionam sem nenhuma violação,
+e um script inline injetado é bloqueado.
 
 ## Limitações conhecidas
 
