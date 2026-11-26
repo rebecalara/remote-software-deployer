@@ -577,6 +577,53 @@ fontes são locais (o CSS traz alguns subconjuntos em `data:`), as imagens são 
 chamadas vão só para `/api`. Com a política ligada, todas as telas funcionam sem nenhuma violação,
 e um script inline injetado é bloqueado.
 
+### Observabilidade (New Relic)
+
+O backend tem o agente do New Relic para Node.js (`newrelic` 14.12.0): APM (tempo das rotas, banco,
+LDAP e erros) e os logs do backend no New Relic, ligados às requisições (*logs in context*). O app
+aparece como **RSD (demo)**.
+
+**Ligar na APP-RSD** (uma vez, depois do deploy):
+
+1. Copie a chave de licença de **ingestão** (tipo *License*, não a *User key*) do New Relic.
+2. No `C:\rsd\config\backend.env`, preencha `NEW_RELIC_LICENSE_KEY='<chave>'`.
+3. `Restart-Service rsd-backend`. Trocar o `backend.env` não dispara deploy, então o reinício é à mão.
+4. No log do serviço (`C:\rsd\logs`), aparece `New Relic ligado (app "RSD (demo)")`. Em alguns
+   minutos, o app aparece no New Relic.
+
+A VM precisa sair pela porta 443 até o New Relic (`collector.newrelic.com`, ou
+`collector.eu.newrelic.com` numa conta da região EU); a regra de saída padrão do Azure permite.
+
+**Como funciona:**
+
+- O agente é carregado no topo do `main.ts` (`src/observability/instrument.ts`), depois do `.env`
+  e antes do Nest, do Express e do Prisma, que ele precisa instrumentar. Não é `-r newrelic` no
+  WinSW: ali ele carregaria antes do `.env` e não acharia a chave.
+- **Sem a chave, o agente nem é carregado:** o backend sobe normalmente, com o aviso
+  `New Relic desligado: NEW_RELIC_LICENSE_KEY ausente`. É o caso do desenvolvimento, do CI e dos
+  testes. `NEW_RELIC_ENABLED=false` desliga o agente mesmo com a chave.
+- A configuração fica em `backend/newrelic.js`, versionada e **sem nenhum segredo**: a chave só
+  existe no `backend.env` da VM, nunca no repositório nem no CI (um teste varre o repositório).
+- O console do backend continua igual. Com o agente ligado, cada linha de log também vai para o
+  New Relic (`AppLogger`), já mascarada.
+
+**O que não vai para o New Relic:**
+
+- **Segredos do `backend.env`:** os valores de `JWT_SECRET`, `LDAP_SEARCH_BIND_PASSWORD`,
+  `WINRM_PASSWORD`, `NEW_RELIC_LICENSE_KEY` e a senha do `DATABASE_URL` viram `[REDACTED]` em
+  qualquer log, assim como URL de banco com senha, `Bearer ...`, tokens JWT, `license_key=` em URL
+  e campos `password`, `senha`, `token` e `secret`.
+- **Cabeçalhos de credencial:** `Authorization`, `Cookie`, `Proxy-Authorization` e `Set-Cookie`
+  ficam excluídos (por padrão o agente só coleta `accept`, `content-length`, `content-type`,
+  `referer`, `user-agent` e `host`), assim como os parâmetros das requisições.
+- **Mensagens de erro:** o erro chega com o tipo e o stack, sem a mensagem
+  (`strip_exception_messages`); a mensagem vai pelo log mascarado, ligada ao erro.
+- **Valores das consultas ao banco:** ocultos (`record_sql: obfuscated`), sem coleta de SQL lento.
+- **A senha do login** nunca é registrada pelo backend; a senha do WinRM e a do banco também não.
+
+O agente de navegador (*Browser*) não é usado: exigiria abrir a Content-Security-Policy para script
+e conexão de terceiros, e enviaria as URLs visitadas (com os filtros) para fora.
+
 ## Limitações conhecidas
 
 - **Validação na rede real pendente.** O login (bind) já foi testado no AD real com uma
