@@ -17,7 +17,8 @@ export default mergeConfig(
         // ponto de entrada, os tipos (sem código) e o próprio material de teste.
         include: ['src/**/*.{ts,tsx}'],
         exclude: ['src/main.tsx', 'src/types/**', 'src/**/*.d.ts', 'src/test/**', 'src/**/*.test.{ts,tsx}'],
-        reporter: ['text-summary', 'text', 'html'],
+        // lcov: lido pelo SonarCloud no CI.
+        reporter: ['text-summary', 'text', 'html', 'lcov'],
         reportsDirectory: './coverage',
       },
     },

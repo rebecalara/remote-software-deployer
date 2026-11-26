@@ -1,5 +1,9 @@
 # Remote Software Deployer
 
+[![CI](https://github.com/rebecalara/remote-software-deployer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rebecalara/remote-software-deployer/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=rebecalara_remote-software-deployer&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=rebecalara_remote-software-deployer)
+[![Cobertura](https://sonarcloud.io/api/project_badges/measure?project=rebecalara_remote-software-deployer&metric=coverage)](https://sonarcloud.io/summary/overall?id=rebecalara_remote-software-deployer)
+
 Aplicação web para **implantação remota de software em estações Windows**, usando o
 Active Directory (AD) como fonte das máquinas e o WinRM/PowerShell para executar a
 instalação. Trabalho de Conclusão de Curso em Engenharia de Software, de Rebeca Lara de
@@ -348,7 +352,12 @@ fictícias, que só valem no container local):
 
 ```bash
 cd backend
-npm test               # mais de 500 testes automatizados
+npm test               # Jest: testes automatizados do backend
+npm run test:cov       # o mesmo, com relatório de cobertura em backend/coverage
+
+cd ../frontend
+npm test               # Vitest + Testing Library (navegador simulado pelo jsdom)
+npm run test:cov       # com relatório de cobertura em frontend/coverage
 ```
 
 ### 5. VM de teste (opcional, para implantar de verdade)
@@ -376,6 +385,24 @@ fictícias falham com "máquina não encontrada", como devem. Para ver uma insta
    Máquinas.
 
 Recomenda-se um checkpoint da VM limpa: cada teste deixa o software instalado.
+
+## Integração contínua
+
+O GitHub Actions (`.github/workflows/ci.yml`) roda a cada push e pull request em `dev` e
+`main`, e também manualmente:
+
+1. **Backend e frontend, em paralelo:** `npm ci`, testes com cobertura
+   (`npm run test:cov`), build e o `lcov.info` guardado como artefato. No backend, também o
+   `prisma generate`. No Linux do CI, os testes que chamam o `powershell.exe` de verdade são
+   pulados.
+2. **SonarCloud**, depois dos dois: análise estática e a cobertura dos dois lados. Sem o
+   token (PR de fork), a análise é pulada.
+
+Um teste ou build que falha deixa o job vermelho. O Quality Gate aparece no SonarCloud e no
+badge, mas não bloqueia o pipeline: a regra padrão pede 80% de cobertura no código novo, e o
+frontend está em ~32%. A regra será revista depois da release.
+
+O deploy não faz parte deste pipeline.
 
 ## Limitações conhecidas
 
