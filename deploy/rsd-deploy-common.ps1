@@ -369,6 +369,58 @@ SELECT 'DEPOIS|' || username || '|' || role::text || '|' || "displayName" FROM "
 "@
 }
 
+# ---------------------------------------------------------------------------------------------
+# Conferência de segredos no audit log do New Relic (deploy\check-newrelic-secrets.ps1). Os valores
+# nunca saem destas funções: o resultado só traz NOMES, contagens e números de linha.
+# ---------------------------------------------------------------------------------------------
+$script:NewRelicLicenseName = 'NEW_RELIC_LICENSE_KEY'
+
+# Segredos do backend.env (os mesmos que o backend mascara: observability/redact.ts), com o nome.
+# A senha do DATABASE_URL entra crua e decodificada. Valores com menos de 4 caracteres ficam de fora.
+function Get-BackendSecrets {
+  param([Parameter(Mandatory)][hashtable]$EnvValues)
+  $list = New-Object Collections.Generic.List[object]
+  foreach ($name in @('JWT_SECRET', 'LDAP_SEARCH_BIND_PASSWORD', 'WINRM_PASSWORD', $script:NewRelicLicenseName)) {
+    $v = "$($EnvValues[$name])".Trim()
+    if ($v.Length -ge 4) { $list.Add([pscustomobject]@{ Name = $name; Value = $v }) }
+  }
+  $m = [regex]::Match("$($EnvValues['DATABASE_URL'])".Trim(), '^postgres(?:ql)?://[^:/@]+:([^@]+)@')
+  if ($m.Success) {
+    $raw = $m.Groups[1].Value
+    foreach ($v in @($raw, [uri]::UnescapeDataString($raw)) | Select-Object -Unique) {
+      if ($v.Length -ge 4) { $list.Add([pscustomobject]@{ Name = 'DATABASE_URL (senha)'; Value = $v }) }
+    }
+  }
+  return $list.ToArray() # um item por segredo no pipeline (quem chama usa @(...))
+}
+
+# Conta, linha a linha, onde cada segredo aparece. A chave do New Relic tem ocorrências ESPERADAS:
+# o agente a envia ao coletor (license_key= na URL, cabeçalho X-License-Key, campo license_key), e o
+# audit log registra esse transporte. Fora desses contextos — por exemplo dentro de um log ou evento
+# enviado — conta como vazamento. Os outros segredos: qualquer ocorrência é vazamento.
+function Find-SecretOccurrences {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Secrets)
+  $results = foreach ($s in $Secrets) {
+    $escaped = [regex]::Escape($s.Value)
+    $expectedContexts = "(?i)(license_key=$escaped|`"license_key`"\s*:\s*`"$escaped`"|x-license-key`"?\s*[:=]\s*`"?$escaped)"
+    $expected = 0; $leaks = 0; $leakLines = New-Object Collections.Generic.List[int]
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+      $line = $Lines[$i]
+      if ($null -eq $line -or -not $line.Contains($s.Value)) { continue }
+      $rest = $line
+      if ($s.Name -eq $script:NewRelicLicenseName) {
+        $expectedHere = ([regex]::Matches($line, $expectedContexts)).Count
+        $expected += $expectedHere
+        $rest = [regex]::Replace($line, $expectedContexts, '')
+      }
+      $leaksHere = ([regex]::Matches($rest, $escaped)).Count
+      if ($leaksHere -gt 0) { $leaks += $leaksHere; $leakLines.Add($i + 1) }
+    }
+    [pscustomobject]@{ Name = $s.Name; Expected = $expected; Leaks = $leaks; LeakLines = $leakLines.ToArray() }
+  }
+  return $results
+}
+
 # URL do Prisma -> partes para o pg_dump, com a senha separada (vai por PGPASSWORD, não pela linha
 # de comando).
 function Split-PgUrl {
