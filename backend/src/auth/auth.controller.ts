@@ -14,7 +14,7 @@ import { AuthService } from './auth.service';
 import { LoginRequestBody, LoginResponse } from './auth.types';
 import { resolveClientIp } from './client-ip';
 import { LoginRateLimiter } from './login-rate-limiter';
-import { recordSecurityEvent, typedUsername } from '../observability/security-events';
+import { ipForLogs, recordSecurityEvent, typedUsername } from '../observability/security-events';
 
 // Motivo no evento de segurança (a resposta ao navegador continua a mesma, genérica).
 const LOGIN_FAILURE_REASONS: Record<number, string> = {
@@ -58,7 +58,7 @@ export class AuthController {
     const ip = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
     const attempt = this.limiter.tryAcquire(ip);
     if ('retryAfterSeconds' in attempt) {
-      this.logger.warn(`Login bloqueado para ${ip}: limite de tentativas atingido.`);
+      this.logger.warn(`Login bloqueado para ${ipForLogs(ip)}: limite de tentativas atingido.`);
       recordSecurityEvent({
         event: 'auth.login',
         result: 'rate_limited',

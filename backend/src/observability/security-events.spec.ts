@@ -13,11 +13,11 @@ import {
 const UPN_TEMPLATE = { LDAP_BIND_DN_TEMPLATE: '{{username}}@rsd-demo.local' };
 
 describe('privacidade (SECURITY_EVENTS_INCLUDE_PII)', () => {
-  it('padrão true; só "false" desliga', () => {
-    expect(includePii({})).toBe(true);
-    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: 'true' })).toBe(true);
-    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: ' FALSE ' })).toBe(false);
-    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: 'não' })).toBe(true);
+  it('padrão FALSE (LGPD); só "true" mostra usuário e IP em texto', () => {
+    expect(includePii({})).toBe(false);
+    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: ' TRUE ' })).toBe(true);
+    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: 'false' })).toBe(false);
+    expect(includePii({ SECURITY_EVENTS_INCLUDE_PII: 'sim' })).toBe(false);
   });
 
   it('hash curto do usuário: 12 caracteres, estável, e muda com o sal', () => {
@@ -78,7 +78,7 @@ describe('buildSecurityAttributes', () => {
   };
 
   it('com PII: usuário e IP como estão; detalhes nulos saem; texto longo é cortado em 200', () => {
-    const a = buildSecurityAttributes(event, { JWT_SECRET: 'sal' });
+    const a = buildSecurityAttributes(event, { SECURITY_EVENTS_INCLUDE_PII: 'true', JWT_SECRET: 'sal' });
     expect(a).toEqual({
       'security.event': 'auth.login',
       'security.result': 'failure',
@@ -106,7 +106,7 @@ describe('buildSecurityAttributes', () => {
     expect(buildSecurityAttributes({ event: 'deployment.finished', result: 'success' }, {})).toEqual({
       'security.event': 'deployment.finished',
       'security.result': 'success',
-      'security.pii': true,
+      'security.pii': false,
     });
   });
 });
@@ -124,7 +124,7 @@ describe('recordSecurityEvent', () => {
   });
 
   it('sucesso vai como INFO; falha, bloqueio e negação como WARN — mensagem estruturada', () => {
-    recordSecurityEvent({ event: 'auth.login', result: 'success', user: 'rebeca' }, {});
+    recordSecurityEvent({ event: 'auth.login', result: 'success', user: 'rebeca' }, { SECURITY_EVENTS_INCLUDE_PII: 'true' });
     expect(log).toHaveBeenCalledWith({ message: 'auth.login success', attributes: expect.objectContaining({ 'user.name': 'rebeca' }) });
     for (const result of ['failure', 'unavailable', 'rate_limited', 'denied', 'expired', 'invalid'] as const) {
       recordSecurityEvent({ event: 'auth.login', result }, {});

@@ -10,9 +10,9 @@ import { isAllowedLdapUsername } from '../ldap/ldap-security';
  *   FROM Log WHERE security.event = 'auth.login' AND security.result = 'failure'
  *
  * Nunca entram: senha, token (nem parte dele) ou corpo da requisição.
- * SECURITY_EVENTS_INCLUDE_PII=false (LGPD): user.name vira um hash curto (SHA-256 com o
+ * SECURITY_EVENTS_INCLUDE_PII (padrão FALSE, LGPD): user.name vira um hash curto (SHA-256 com o
  * JWT_SECRET como sal, 12 caracteres) e client.ip vira o prefixo de rede (/24 no IPv4, /48 no
- * IPv6). Padrão: true (demo).
+ * IPv6). Só "true" mostra em texto. A mesma regra vale para os logs comuns (userForLogs, ipForLogs).
  */
 
 export type SecurityEventName =
@@ -52,12 +52,27 @@ const MAX_DETAIL_LENGTH = 200;
 
 const logger = new Logger('Security');
 
+/** Padrão FALSE: só "true" mostra usuário e IP em texto (LGPD; decidido com a autora). */
 export function includePii(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.SECURITY_EVENTS_INCLUDE_PII ?? '').trim().toLowerCase() !== 'false';
+  return (env.SECURITY_EVENTS_INCLUDE_PII ?? '').trim().toLowerCase() === 'true';
 }
 
 export function pseudonymizeUser(username: string, salt: string): string {
   return createHash('sha256').update(`${salt}:${username}`).digest('hex').slice(0, 12);
+}
+
+/**
+ * Usuário num log comum (não evento), com a MESMA regra e o mesmo hash dos eventos de segurança —
+ * o pseudônimo do log bate com o user.name do evento. Com PII: entre aspas (JSON.stringify: um nome
+ * com quebra de linha não forja linhas no log). Sem PII: "usuário#<hash de 12>".
+ */
+export function userForLogs(username: string, env: NodeJS.ProcessEnv = process.env): string {
+  return includePii(env) ? JSON.stringify(username) : `usuário#${pseudonymizeUser(username, env.JWT_SECRET ?? '')}`;
+}
+
+/** IP num log comum: com PII, como está; sem PII, o prefixo de rede (mesma regra dos eventos). */
+export function ipForLogs(ip: string, env: NodeJS.ProcessEnv = process.env): string {
+  return includePii(env) ? ip : truncateIp(ip);
 }
 
 /** "203.0.113.57" -> "203.0.113.0/24"; IPv6 -> /48; outro texto (ex.: "desconhecido") fica igual. */

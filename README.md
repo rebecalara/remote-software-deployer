@@ -650,11 +650,12 @@ campo de usuário). Um evento que falha nunca derruba a rota. Consulta no New Re
 FROM Log SELECT count(*) WHERE security.event = 'auth.login' AND security.result = 'failure' FACET client.ip SINCE 1 day ago
 ```
 
-**Privacidade (LGPD):** `SECURITY_EVENTS_INCLUDE_PII` (padrão `true`, que é o caso da demo). Com
-`false`, o usuário vira um hash curto (SHA-256 com o `JWT_SECRET` como sal, 12 caracteres) e o IP
-vira o prefixo de rede (`/24`). **No piloto da Prefeitura, isso deve ser decidido com a TI antes de
-ligar o New Relic**: com `true`, nomes de usuário e IPs dos operadores ficam guardados num serviço
-de fora.
+**Privacidade (LGPD):** `SECURITY_EVENTS_INCLUDE_PII`, padrão `false`: o usuário vira um hash
+curto (SHA-256 com o `JWT_SECRET` como sal, 12 caracteres) e o IP vira o prefixo de rede (`/24`),
+nos eventos de segurança **e nos logs comuns** (login, inventário) — o pseudônimo é o mesmo nos dois,
+para cruzar um log com o evento. Só `true` mostra usuário e IP em texto. **No piloto da
+Prefeitura, isso deve ser decidido com a TI antes de ligar o New Relic**: com `true`, nomes de
+usuário e IPs dos operadores ficam guardados num serviço de fora.
 
 **Conferir que nenhum segredo sai** (`deploy\check-newrelic-secrets.ps1`, como administrador):
 
