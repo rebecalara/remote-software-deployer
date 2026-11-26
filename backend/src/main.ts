@@ -1,4 +1,5 @@
-import 'dotenv/config';
+// PRIMEIRO: .env e, se houver chave, o agente New Relic (antes do Nest, do Express e do Prisma).
+import './observability/instrument';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
