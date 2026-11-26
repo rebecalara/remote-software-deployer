@@ -2,7 +2,8 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
 import { ROLES_KEY } from './roles.decorator';
-import { AuthenticatedRequest } from './jwt-auth.guard';
+import { AuthenticatedRequest, handlerName } from './jwt-auth.guard';
+import { recordSecurityEvent, requestIp } from '../observability/security-events';
 
 // Deve rodar depois do JwtAuthGuard, que preenche request.user.
 @Injectable()
@@ -18,8 +19,17 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const { user } = request;
     if (!user || !requiredRoles.includes(user.role)) {
+      recordSecurityEvent(() => ({
+        event: 'authz.forbidden',
+        result: 'denied',
+        user: user?.username ?? null,
+        role: user?.role ?? null,
+        ip: requestIp(request),
+        details: { 'http.status': 403, 'http.method': request.method, handler: handlerName(context), required_roles: requiredRoles.join(',') },
+      }));
       throw new ForbiddenException('Seu perfil não tem permissão para esta ação.');
     }
     return true;

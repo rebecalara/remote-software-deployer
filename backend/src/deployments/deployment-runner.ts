@@ -2,7 +2,8 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { DeploymentAction, DeploymentStatus, InstallType, LogLevel } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InstallerStorageService } from '../software/installer-storage.service';
-import { aggregateDeploymentStatus, interpretResult } from './deployment-outcome';
+import { aggregateDeploymentStatus, displayStatus, interpretResult } from './deployment-outcome';
+import { recordSecurityEvent } from '../observability/security-events';
 import { DeployResult, PowerShellExecutor } from './powershell-executor';
 import { VENDOR_UNINSTALL_DISABLED, vendorUninstallEnabled } from './vendor-uninstall';
 import { QueueItem, TargetQueue, parseMaxParallel } from './target-queue';
@@ -232,10 +233,27 @@ export class DeploymentRunner implements OnApplicationBootstrap {
     });
     const status = aggregateDeploymentStatus(targets.map((t) => t.status));
     if (status === null) return;
-    await this.prisma.deployment.updateMany({
+    const closed = await this.prisma.deployment.updateMany({
       where: { id: deploymentId, finishedAt: null },
       data: { status, finishedAt: new Date() },
     });
+    // Só quem de fato fechou registra o evento (a condição finishedAt nulo garante um só).
+    if (closed?.count === 1) {
+      const count = (s: DeploymentStatus) => targets.filter((t) => t.status === s).length;
+      const succeeded = count(DeploymentStatus.SUCCEEDED);
+      recordSecurityEvent({
+        event: 'deployment.finished',
+        result: 'success',
+        details: {
+          'deployment.id': deploymentId,
+          'deployment.status': displayStatus(status, { succeeded }),
+          'deployment.machines': targets.length,
+          'deployment.succeeded': succeeded,
+          'deployment.failed': count(DeploymentStatus.FAILED),
+          'deployment.cancelled_machines': count(DeploymentStatus.CANCELLED),
+        },
+      });
+    }
   }
 
   private async installerProblem(fileName: string | null): Promise<string | null> {

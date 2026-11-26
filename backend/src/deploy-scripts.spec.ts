@@ -1007,6 +1007,85 @@ describe('deploy/add-user.ps1 — usuários iniciais (o login nunca cria usuári
   });
 });
 
+describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai para o New Relic', () => {
+  const script = codeOf('check-newrelic-secrets.ps1');
+
+  it('lê os segredos do backend.env e nunca imprime um valor (só nomes, contagens e linhas)', () => {
+    expect(script).toContain('Get-BackendSecrets -EnvValues $envValues');
+    expect(script).toContain('Find-SecretOccurrences -Lines $lines -Secrets $secrets');
+    const printed = script.split('\n').filter((l) => /Write-Host/.test(l));
+    expect(printed.length).toBeGreaterThan(5);
+    for (const l of printed) expect(l).not.toMatch(/\.Value\b|\$lines\b|\$line\b/);
+    // A senha de teste é lida sem eco.
+    expect(script).toMatch(/Read-Host -AsSecureString 'Senha de teste/);
+  });
+
+  it('apagar os logs só com confirmação explícita (SIM), e sempre lembra de desligar o audit log', () => {
+    const ask = script.indexOf("Read-Host 'Apagar esses arquivos agora?");
+    const remove = script.indexOf('Remove-Item -LiteralPath $f.FullName');
+    expect(ask).toBeGreaterThan(0);
+    expect(remove).toBeGreaterThan(ask);
+    expect(script).toContain("if ($answer -ceq 'SIM') {");
+    expect(script).toMatch(/LEMBRETE: desligue o audit log[^\n]*NEW_RELIC_AUDIT_LOG_ENABLED[^\n]*Restart-Service rsd-backend/);
+    expect(script).toMatch(/if \(\$leakTotal -gt 0\) \{ exit 1 \}\s*$/);
+  });
+
+  onWindows('com o PowerShell de verdade', () => {
+    const ENV = {
+      JWT_SECRET: 'jwtSegredoDeTeste0123456789abcdefXYZ',
+      LDAP_SEARCH_BIND_PASSWORD: 'LdapSenhaTeste',
+      WINRM_PASSWORD: '',
+      NEW_RELIC_LICENSE_KEY: 'abcdef0123456789'.repeat(2) + 'abcd' + 'NRAL', // montada: nenhuma literal no formato de uma license key
+      DATABASE_URL: 'postgresql://rsd_app:Db%40Senha_9@127.0.0.1:5432/rsd?schema=public',
+    };
+    const KEY = ENV.NEW_RELIC_LICENSE_KEY;
+
+    it(
+      'Get-BackendSecrets: os segredos pelo nome, a senha do banco crua e decodificada; vazio fica de fora',
+      () => {
+        const out = runPs(`
+          $e = @{ JWT_SECRET = '${ENV.JWT_SECRET}'; LDAP_SEARCH_BIND_PASSWORD = '${ENV.LDAP_SEARCH_BIND_PASSWORD}'; WINRM_PASSWORD = ''; NEW_RELIC_LICENSE_KEY = '${KEY}'; DATABASE_URL = '${ENV.DATABASE_URL}' }
+          ConvertTo-Json -Compress @(Get-BackendSecrets -EnvValues $e | ForEach-Object { $_.Name + '=' + $_.Value })`) as string[];
+        expect(out).toEqual([
+          `JWT_SECRET=${ENV.JWT_SECRET}`,
+          `LDAP_SEARCH_BIND_PASSWORD=${ENV.LDAP_SEARCH_BIND_PASSWORD}`,
+          `NEW_RELIC_LICENSE_KEY=${KEY}`,
+          'DATABASE_URL (senha)=Db%40Senha_9',
+          'DATABASE_URL (senha)=Db@Senha_9',
+        ]);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'Find-SecretOccurrences: chave no transporte ao coletor é esperada; em payload de log, vazamento; o resultado não traz valores',
+      () => {
+        const lines = [
+          `{"component":"collector_api","msg":"Posting to https://collector.newrelic.com/agent_listener/invoke_raw_method?marshal_format=json&license_key=${KEY}&method=connect"}`,
+          `{"headers":{"X-License-Key":"${KEY}","Content-Type":"application/json"}}`,
+          `{"message":"linha de log com ${KEY} dentro","level":"INFO"}`,
+          'linha sem segredo nenhum',
+          `{"message":"jwt ${ENV.JWT_SECRET}"}`,
+          `license_key=${KEY} e de novo ${KEY} solto`,
+          '{"error.message":"conexão com Db@Senha_9 recusada"}',
+        ];
+        const out = runPs(`
+          $lines = @(${lines.map((l) => `'${l.replace(/'/g, "''")}'`).join(', ')})
+          $s = @(Get-BackendSecrets -EnvValues @{ JWT_SECRET = '${ENV.JWT_SECRET}'; LDAP_SEARCH_BIND_PASSWORD = '${ENV.LDAP_SEARCH_BIND_PASSWORD}'; NEW_RELIC_LICENSE_KEY = '${KEY}'; DATABASE_URL = '${ENV.DATABASE_URL}' })
+          ConvertTo-Json -Compress -Depth 4 @(Find-SecretOccurrences -Lines $lines -Secrets $s)`) as { Name: string; Expected: number; Leaks: number; LeakLines: number[] }[];
+        const by = (name: string) => out.filter((r) => r.Name === name);
+        expect(by('NEW_RELIC_LICENSE_KEY')).toEqual([{ Name: 'NEW_RELIC_LICENSE_KEY', Expected: 3, Leaks: 2, LeakLines: [3, 6] }]);
+        expect(by('JWT_SECRET')).toEqual([{ Name: 'JWT_SECRET', Expected: 0, Leaks: 1, LeakLines: [5] }]);
+        expect(by('LDAP_SEARCH_BIND_PASSWORD')).toEqual([{ Name: 'LDAP_SEARCH_BIND_PASSWORD', Expected: 0, Leaks: 0, LeakLines: [] }]);
+        expect(by('DATABASE_URL (senha)').map((r) => r.Leaks)).toEqual([0, 1]); // crua: não aparece; decodificada: linha 7
+        const json = JSON.stringify(out);
+        for (const v of [KEY, ENV.JWT_SECRET, ENV.LDAP_SEARCH_BIND_PASSWORD, 'Db@Senha_9', 'Db%40Senha_9']) expect(json).not.toContain(v);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+  });
+});
+
 describe('permissões do rsd_app — conferência em todo deploy e prova prática', () => {
   it('o deploy confere as permissões DEPOIS da migração e ANTES da troca de versão', () => {
     const code = codeOf('deploy.ps1');
