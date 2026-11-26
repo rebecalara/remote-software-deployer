@@ -20,6 +20,7 @@ import type { IncomingMessage } from 'node:http';
 import { PassThrough, type Readable } from 'node:stream';
 import { JwtPayload } from '../auth/auth.types';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { recordSecurityEvent, requestIp, SecurityDetail, SecurityEventName } from '../observability/security-events';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { InstallerLimits, SoftwareService, SoftwareView } from './software.service';
@@ -69,7 +70,12 @@ export class SoftwareController {
   @HttpCode(HttpStatus.CREATED)
   @CanWriteCatalog()
   create(@Body() body: unknown, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
-    return this.softwareService.create(validateSoftwareCreate(body), userIdOf(req));
+    // Validação síncrona (400 na hora); o evento só depois de gravado.
+    const input = validateSoftwareCreate(body);
+    return Promise.resolve(this.softwareService.create(input, userIdOf(req))).then((view) => {
+      catalogEvent('catalog.software.created', req, () => softwareDetails(view));
+      return view;
+    });
   }
 
   @Patch(':id')
@@ -79,22 +85,31 @@ export class SoftwareController {
     @Body() body: unknown,
     @Req() req: AuthenticatedRequest,
   ): Promise<SoftwareView> {
-    return this.softwareService.update(id, validateSoftwareUpdate(body), userIdOf(req));
+    const input = validateSoftwareUpdate(body);
+    return Promise.resolve(this.softwareService.update(id, input, userIdOf(req))).then((view) => {
+      // Só os NOMES dos campos alterados (os valores ficam na auditoria do próprio software).
+      catalogEvent('catalog.software.updated', req, () => ({ ...softwareDetails(view), 'software.fields': Object.keys(input).sort().join(',') }));
+      return view;
+    });
   }
 
   /** Some da seleção de novas implantações; continua no histórico. */
   @Post(':id/deactivate')
   @HttpCode(HttpStatus.OK)
   @CanWriteCatalog()
-  deactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
-    return this.softwareService.setActive(id, false, userIdOf(req));
+  async deactivate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
+    const view = await this.softwareService.setActive(id, false, userIdOf(req));
+    catalogEvent('catalog.software.deactivated', req, () => softwareDetails(view));
+    return view;
   }
 
   @Post(':id/activate')
   @HttpCode(HttpStatus.OK)
   @CanWriteCatalog()
-  activate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
-    return this.softwareService.setActive(id, true, userIdOf(req));
+  async activate(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<SoftwareView> {
+    const view = await this.softwareService.setActive(id, true, userIdOf(req));
+    catalogEvent('catalog.software.activated', req, () => softwareDetails(view));
+    return view;
   }
 
   /**
@@ -124,7 +139,13 @@ export class SoftwareController {
       });
       req.on('error', (err) => body.destroy(err));
       req.pipe(body);
-      return await this.softwareService.uploadInstaller(id, body, originalName, userIdOf(req));
+      const view = await this.softwareService.uploadInstaller(id, body, originalName, userIdOf(req));
+      catalogEvent('catalog.software.installer_uploaded', req, () => ({
+        ...softwareDetails(view),
+        'installer.sha256': view.installer?.sha256 ?? null,
+        'installer.size_bytes': view.installer?.sizeBytes ?? null,
+      }));
+      return view;
     } catch (err) {
       req.unpipe(body);
       body.destroy();
@@ -137,8 +158,9 @@ export class SoftwareController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @CanWriteCatalog()
-  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.softwareService.remove(id);
+  async remove(@Param('id', ParseUUIDPipe) id: string, @Req() req?: AuthenticatedRequest): Promise<void> {
+    await this.softwareService.remove(id);
+    catalogEvent('catalog.software.deleted', req, () => ({ 'software.id': id }));
   }
 }
 
@@ -179,6 +201,19 @@ export function discardLimit(contentLength: string | undefined, maxBytes: number
   const declared = Number(contentLength);
   const wanted = Number.isInteger(declared) && declared > 0 ? declared : maxBytes;
   return Math.min(wanted, maxBytes * DISCARD_CEILING_FACTOR);
+}
+
+/** Evento de segurança de mudança no catálogo, com quem fez e de onde. */
+function catalogEvent(
+  event: SecurityEventName,
+  req: AuthenticatedRequest | UploadRequest | undefined,
+  details: () => Record<string, SecurityDetail>,
+): void {
+  recordSecurityEvent(() => ({ event, result: 'success', user: req?.user?.username, role: req?.user?.role, ip: requestIp(req), details: details() }));
+}
+
+export function softwareDetails(view: SoftwareView): Record<string, string> {
+  return { 'software.id': view.id, 'software.name': `${view.name} ${view.version}`, 'software.type': view.installType };
 }
 
 // O JwtAuthGuard roda antes e sempre preenche request.user; o `sub` é o id do User.

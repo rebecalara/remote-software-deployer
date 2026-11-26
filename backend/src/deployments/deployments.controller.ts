@@ -19,6 +19,7 @@ import type { Response } from 'express';
 import { AuthenticatedRequest, JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { recordSecurityEvent, requestIp } from '../observability/security-events';
 import { parseDeploymentListQuery, parseMaxMachines, validateDeploymentCreate } from './deployment-validation';
 import {
   DeploymentLogView,
@@ -114,7 +115,21 @@ export class DeploymentsController {
   @HttpCode(HttpStatus.CREATED)
   @Roles(...DEPLOYMENT_WRITE_ROLES)
   create(@Body() body: unknown, @Req() req: AuthenticatedRequest): Promise<DeploymentView> {
-    return this.deploymentsService.create(validateDeploymentCreate(body, this.maxMachines), req.user!.sub);
+    // Validação síncrona (400 na hora); o evento só depois de criada.
+    const input = validateDeploymentCreate(body, this.maxMachines);
+    return Promise.resolve(this.deploymentsService.create(input, req.user!.sub)).then((view) => this.created(view, req));
+  }
+
+  private created(view: DeploymentView, req: AuthenticatedRequest): DeploymentView {
+    recordSecurityEvent(() => ({
+      event: 'deployment.created',
+      result: 'success',
+      user: req.user!.username,
+      role: req.user!.role,
+      ip: requestIp(req),
+      details: deploymentDetails(view),
+    }));
+    return view;
   }
 
   /** Cancela só as máquinas pendentes; as em execução terminam normalmente. */
@@ -122,6 +137,30 @@ export class DeploymentsController {
   @HttpCode(HttpStatus.OK)
   @Roles(...DEPLOYMENT_WRITE_ROLES)
   cancel(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest): Promise<DeploymentView> {
-    return this.deploymentsService.cancel(id, req.user!.username);
+    return Promise.resolve(this.deploymentsService.cancel(id, req.user!.username)).then((view) => this.cancelled(view, req));
   }
+
+  private cancelled(view: DeploymentView, req: AuthenticatedRequest): DeploymentView {
+    recordSecurityEvent(() => ({
+      event: 'deployment.cancelled',
+      result: 'success',
+      user: req.user!.username,
+      role: req.user!.role,
+      ip: requestIp(req),
+      details: { ...deploymentDetails(view), 'deployment.cancelled_machines': view.counts.cancelled },
+    }));
+    return view;
+  }
+}
+
+/** Atributos da implantação nos eventos de segurança (sem o comando do fabricante nem nomes de máquina). */
+export function deploymentDetails(view: DeploymentView): Record<string, string | number | null> {
+  return {
+    'deployment.id': view.id,
+    'deployment.action': view.action,
+    'deployment.machines': view.targets.length,
+    'software.id': view.software?.id ?? null,
+    'software.name': view.software ? `${view.software.name} ${view.software.version}` : (view.product?.name ?? null),
+    'product.code': view.product?.productCode ?? null,
+  };
 }
