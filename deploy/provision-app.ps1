@@ -21,19 +21,27 @@
   Nenhum segredo é escrito no repositório nem na tela. As senhas digitadas (svc-rsd, token do
   runner) são lidas como SecureString e não são guardadas em arquivo.
 
-  Uso (PowerShell como administrador, na pasta do clone):
-    .\deploy\provision-app.ps1 -PublicHost rsd.exemplo.com.br
+  Uso (PowerShell como administrador):
+    Na primeira vez a VM não tem Git: "Download ZIP" da branch dev no GitHub, extrair e
+    desbloquear (o Windows marca o que veio da internet):
+      Expand-Archive .\remote-software-deployer-dev.zip -DestinationPath C:\rsd\setup\repo
+      Get-ChildItem -Recurse C:\rsd\setup\repo | Unblock-File
+      cd C:\rsd\setup\repo\remote-software-deployer-dev
+    Depois, com o Git já instalado, o clone serve. Em qualquer caso:
+      .\deploy\provision-app.ps1 -PublicHost rsd-demo-rebeca.chilecentral.cloudapp.azure.com
 #>
 [CmdletBinding()]
 param(
-  # Domínio público do RSD (o mesmo do Caddyfile); usado pelo health check do deploy.
-  [Parameter(Mandatory)][string]$PublicHost,
+  # Domínio público do RSD: entra no Caddyfile (no lugar de __RSD_PUBLIC_HOST__) e no deploy.env
+  # (health check do site). Ex.: rsd-demo-rebeca.chilecentral.cloudapp.azure.com
+  [Parameter(Mandatory)][ValidatePattern('^(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$')][string]$PublicHost,
   [string]$Repo = 'rebecalara/remote-software-deployer',
   [string]$ServiceAccount = 'RSDDEMO\svc-rsd',
   [string]$RunnerAccount = 'rsd-runner',
   [string]$RunnerDir = 'C:\actions-runner',
   [string]$ExpectedDomain = 'rsd-demo.local',
   [string]$CaddyfileTarget = 'C:\rsd\caddy\Caddyfile',
+  [string]$CaddyService = 'caddy',
   # Pede de novo a senha da svc-rsd e reconfigura o serviço (troca de senha da conta).
   [switch]$ResetServicePassword,
   [switch]$SkipRunner
@@ -462,25 +470,47 @@ if (Test-Path $P.Current) {
 
 # =============================================================================================
 Step '11. Caddy'
-$caddyFile = Join-Path $RepoRoot 'deploy\Caddyfile'
-$caddySvc = Get-CimInstance Win32_Service | Where-Object { $_.PathName -match 'caddy' } | Select-Object -First 1
-if (-not (Test-Path $caddyFile)) {
-  Warn 'deploy\Caddyfile ainda não está no repositório: Caddy não alterado.'
+# O Caddyfile do repositório tem __RSD_PUBLIC_HOST__ no lugar do domínio (como o backend.env.example
+# tem __DATABASE_URL__): este passo troca pelo -PublicHost, valida, guarda o anterior e REINICIA o
+# serviço — com "admin off" não existe "caddy reload". Se o Caddy não subir, volta o anterior.
+$caddyTemplate = Join-Path $RepoRoot 'deploy\Caddyfile'
+$caddySvc = Get-CimInstance Win32_Service -Filter "Name='$CaddyService'"
+if (-not (Test-Path $caddyTemplate)) {
+  Warn 'deploy\Caddyfile não encontrado no repositório: Caddy não alterado.'
 } elseif (-not $caddySvc) {
-  Warn 'serviço do Caddy não encontrado: Caddy não alterado.'
+  Warn "serviço '$CaddyService' não encontrado: Caddy não alterado."
 } else {
-  $caddyExe = ([regex]::Match($caddySvc.PathName, '^"?([^"]+?caddy[^"\s]*\.exe)')).Groups[1].Value
-  & $caddyExe validate --config $caddyFile --adapter caddyfile
-  if ($LASTEXITCODE -ne 0) { throw 'caddy validate recusou deploy\Caddyfile: nada foi alterado.' }
-  $backup = $null
-  if (Test-Path $CaddyfileTarget) { $backup = "$CaddyfileTarget.bak-$(Get-Date -Format yyyyMMddHHmmss)"; Copy-Item -LiteralPath $CaddyfileTarget -Destination $backup }
-  Copy-Item -LiteralPath $caddyFile -Destination $CaddyfileTarget -Force
-  & $caddyExe reload --config $CaddyfileTarget --adapter caddyfile
-  if ($LASTEXITCODE -ne 0) {
-    if ($backup) { Copy-Item -LiteralPath $backup -Destination $CaddyfileTarget -Force; & $caddyExe reload --config $CaddyfileTarget --adapter caddyfile }
-    throw 'caddy reload falhou: Caddyfile anterior restaurado.'
+  $caddyExe = ([regex]::Match($caddySvc.PathName, '^"?([^"]+?\.exe)')).Groups[1].Value
+  $rendered = Join-Path $Setup 'Caddyfile'
+  $text = [IO.File]::ReadAllText($caddyTemplate)
+  if (-not $text.Contains('__RSD_PUBLIC_HOST__')) { throw 'deploy\Caddyfile sem o marcador __RSD_PUBLIC_HOST__.' }
+  [IO.File]::WriteAllText($rendered, $text.Replace('__RSD_PUBLIC_HOST__', $PublicHost), (New-Object Text.UTF8Encoding($false)))
+  & $caddyExe validate --config $rendered --adapter caddyfile
+  if ($LASTEXITCODE -ne 0) { throw 'caddy validate recusou o Caddyfile: nada foi alterado.' }
+  $current = if (Test-Path $CaddyfileTarget) { [IO.File]::ReadAllText($CaddyfileTarget) } else { '' }
+  if ($current -eq [IO.File]::ReadAllText($rendered)) {
+    Info 'Caddyfile já é o do repositório: Caddy não reiniciado.'
+  } else {
+    $backup = $null
+    if ($current) { $backup = "$CaddyfileTarget.bak-$(Get-Date -Format yyyyMMddHHmmss)"; Copy-Item -LiteralPath $CaddyfileTarget -Destination $backup }
+    Copy-Item -LiteralPath $rendered -Destination $CaddyfileTarget -Force
+    $ok = $true
+    try {
+      Restart-Service -Name $CaddyService
+      (Get-Service -Name $CaddyService).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+      Start-Sleep -Seconds 3 # o Caddy sobe e cai em seguida se a configuração não carregar
+      $ok = (Get-Service -Name $CaddyService).Status -eq 'Running' -and [bool](Get-NetTCPConnection -State Listen -LocalPort 443 -ErrorAction SilentlyContinue)
+    } catch { $ok = $false }
+    if (-not $ok) {
+      if ($backup) {
+        Copy-Item -LiteralPath $backup -Destination $CaddyfileTarget -Force
+        Restart-Service -Name $CaddyService -ErrorAction SilentlyContinue
+      }
+      throw "O Caddy não ficou no ar com o Caddyfile novo (serviço parado ou porta 443 fechada). Anterior restaurado; veja C:\rsd\logs\caddy.log."
+    }
+    Info "Caddyfile aplicado para $PublicHost e Caddy reiniciado$(if ($backup) { " (anterior em $backup)" })."
+    if (-not (Test-Path $P.Current)) { Info 'O site só mostra o frontend depois do primeiro deploy (C:\rsd\app\current ainda não existe).' }
   }
-  Info "Caddyfile aplicado e recarregado$(if ($backup) { " (anterior em $backup)" })."
 }
 
 # =============================================================================================
@@ -520,5 +550,6 @@ $missing = @('JWT_SECRET', 'LDAP_URL', 'LDAP_BIND_DN_TEMPLATE', 'LDAP_SEARCH_BIN
 Info "Node $((& $NodeExe --version).Trim()); $((& $GitExe --version).Trim()); $((& $pgExe --version).Trim())."
 Info "Banco ${DbName}: rsd_owner (C:\rsd\config\deploy.env) e rsd_app (C:\rsd\config\backend.env)."
 if ($missing) { Warn "preencha no backend.env: $($missing -join ', ')." } else { Info 'backend.env sem campos obrigatórios vazios.' }
-if (-not (Test-Path $P.CaPem)) { Info 'Sem C:\rsd\config\rsd-ca.pem: se a CA do AD for interna, coloque o arquivo e rode este script de novo.' }
+if (Test-Path $P.CaPem) { Info 'CA do AD: C:\rsd\config\rsd-ca.pem (NODE_EXTRA_CA_CERTS no serviço).' } else { Warn 'sem C:\rsd\config\rsd-ca.pem: o LDAPS com a CA interna do AD não vai validar o certificado.' }
+Info 'Para rodar este preparo de novo: o Git já está instalado, então use um git clone do repositório (o ZIP só era preciso na primeira vez).'
 Info 'Pronto. O próximo passo é o PR dev -> main (o primeiro deploy roda sozinho).'

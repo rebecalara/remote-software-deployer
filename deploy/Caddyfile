@@ -1,0 +1,52 @@
+# Caddy da APP-RSD (Caddy v2.11.9, serviço "caddy", LocalSystem). Versionado, mas aplicado SÓ pelo
+# deploy\provision-app.ps1 (administrador): ele troca o marcador do domínio pelo -PublicHost, roda
+# "caddy validate" e reinicia o serviço (admin off: não há "caddy reload"). O deploy não toca aqui.
+{
+	# Sem API de administração (localhost:2019): nenhum processo local reconfigura o Caddy.
+	admin off
+	storage file_system C:/rsd/caddy/data
+	log {
+		output file C:/rsd/logs/caddy.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
+
+__RSD_PUBLIC_HOST__ {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		# Conferida contra o que o frontend carrega: scripts e CSS só do próprio site (sem inline),
+		# fontes locais (inclusive subconjuntos embutidos em data:), imagens locais, chamadas só
+		# para /api e nenhum site pode pôr o RSD num frame.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	request_body {
+		max_size 600MB
+	}
+
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	handle {
+		# A versão no ar: junção trocada pelo deploy.ps1 (C:\rsd\app\current -> releases\<versão>).
+		root * C:/rsd/app/current/frontend
+
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		@paginas not path /assets/*
+		header @paginas Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

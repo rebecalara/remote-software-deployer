@@ -422,6 +422,26 @@ de cada publicação fica no GitHub, em *Deployments* → `production`.
 | Com que conta | administrador | `rsd-runner` (conta local, sem administração) |
 | O que faz | Node, Git e PostgreSQL nas versões exatas (hash e assinatura conferidos); banco e papéis; pastas e permissões; serviço `rsd-backend`; Caddyfile; runner | build do backend, backup, migrações, troca de versão, health check, rollback |
 
+**Rodar o preparo** (PowerShell como administrador, na APP-RSD):
+
+- **Na primeira vez a VM ainda não tem Git**: baixe o código pelo GitHub (branch `dev` → *Code*
+  → *Download ZIP*), extraia e desbloqueie os arquivos — o Windows marca o que veio da internet,
+  e o PowerShell recusaria os scripts:
+
+  ```powershell
+  Expand-Archive .\remote-software-deployer-dev.zip -DestinationPath C:\rsd\setup\repo
+  Get-ChildItem -Recurse C:\rsd\setup\repo | Unblock-File
+  cd C:\rsd\setup\repo\remote-software-deployer-dev
+  .\deploy\provision-app.ps1 -PublicHost rsd-demo-rebeca.chilecentral.cloudapp.azure.com
+  ```
+
+- **Depois** (o preparo instala o Git), para rodar de novo: `git clone` do repositório e o mesmo
+  comando. O script é idempotente: só confere e completa o que falta.
+
+Durante o preparo, você digita a senha da `RSDDEMO\svc-rsd` e cola o token de registro do runner
+(*Settings → Actions → Runners → New self-hosted runner*; vale 1 hora). No fim, o resumo diz o
+que falta preencher no `C:\rsd\config\backend.env` (`JWT_SECRET` e LDAP).
+
 **Contas e papéis**, cada um com o mínimo:
 
 - `RSDDEMO\svc-rsd` roda o backend (serviço `rsd-backend`, pelo [WinSW](deploy/rsd-backend.xml)) e é
@@ -514,8 +534,29 @@ completo exigiria um repositório privado ou uma organização com grupos de run
 
 O [`deploy/Caddyfile`](deploy/Caddyfile) é versionado, mas **não** é aplicado pelo deploy: o Caddy
 roda como SYSTEM, e dar ao runner permissão no Caddyfile seria dar a ele um caminho para ler
-qualquer arquivo. Quem aplica (com `caddy validate` antes e `caddy reload`, voltando o anterior
-se falhar) é o `provision-app.ps1`, rodado por administrador.
+qualquer arquivo. Quem aplica é o `provision-app.ps1`, rodado por administrador:
+
+1. troca o marcador `__RSD_PUBLIC_HOST__` pelo domínio passado em `-PublicHost`;
+2. `caddy validate` (se recusar, nada muda);
+3. guarda o Caddyfile anterior (`C:\rsd\caddy\Caddyfile.bak-<data>`), copia o novo e
+   **reinicia o serviço `caddy`** — com `admin off` não há API de administração, então também não
+   há `caddy reload`;
+4. se o Caddy não ficar no ar (serviço parado ou porta 443 fechada), volta o anterior.
+
+O que o Caddyfile faz: HTTPS automático no domínio, `encode zstd gzip`, `/api/*` para o backend
+em `127.0.0.1:3000`, o frontend da versão no ar (`C:\rsd\app\current\frontend`), cache longo nos
+`/assets` e `no-cache` nas páginas, envio de até 600 MB e os cabeçalhos de segurança: HSTS,
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` e a **Content-Security-Policy**:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:;
+connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+Ela foi conferida contra o que o frontend realmente carrega. Não há script nem estilo inline, as
+fontes são locais (o CSS traz alguns subconjuntos em `data:`), as imagens são locais e as
+chamadas vão só para `/api`. Com a política ligada, todas as telas funcionam sem nenhuma violação,
+e um script inline injetado é bloqueado.
 
 ## Limitações conhecidas
 

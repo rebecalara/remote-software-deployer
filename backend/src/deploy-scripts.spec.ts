@@ -211,10 +211,68 @@ describe('provision-app.ps1 — regras do preparo', () => {
     expect(text).toContain("--labels 'rsd-app'");
   });
 
-  it('Caddy: valida antes de aplicar e restaura o anterior se o reload falhar', () => {
-    const block = text.slice(text.indexOf("Step '11. Caddy'"), text.indexOf("Step \"12."));
-    expect(block.indexOf('validate')).toBeLessThan(block.indexOf('Copy-Item -LiteralPath $caddyFile'));
-    expect(block).toMatch(/reload[\s\S]*Copy-Item -LiteralPath \$backup/);
+  it('Caddy: troca o marcador pelo -PublicHost, valida ANTES de copiar e reinicia o serviço (admin off: sem reload)', () => {
+    const block = codeOf('provision-app.ps1').slice(
+      codeOf('provision-app.ps1').indexOf("Step '11. Caddy'"),
+      codeOf('provision-app.ps1').indexOf('Step "12.'),
+    );
+    expect(block).toContain("$text.Replace('__RSD_PUBLIC_HOST__', $PublicHost)");
+    expect(block.indexOf('validate --config $rendered')).toBeGreaterThan(0);
+    expect(block.indexOf('validate --config $rendered')).toBeLessThan(block.indexOf('Copy-Item -LiteralPath $rendered'));
+    expect(block).toContain('Restart-Service -Name $CaddyService');
+    expect(block).not.toMatch(/caddy[^\n]*reload|\breload --config/);
+    // Caddy que não fica no ar: o Caddyfile anterior volta.
+    expect(block).toMatch(/if \(-not \$ok\) \{[\s\S]*Copy-Item -LiteralPath \$backup -Destination \$CaddyfileTarget/);
+  });
+
+  it('o resumo não manda colocar o rsd-ca.pem e rodar de novo (o arquivo já existe na VM)', () => {
+    expect(text).not.toMatch(/coloque o arquivo e rode este script de novo/);
+    expect(text).toContain('Download ZIP');
+  });
+});
+
+describe('deploy/Caddyfile', () => {
+  const caddy = read('Caddyfile');
+  const CSP =
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
+  it('sem API de administração e com o domínio como marcador (preenchido pelo provision)', () => {
+    expect(caddy).toMatch(/^\{\n\t# [^\n]*\n\tadmin off\n/m);
+    expect(caddy).toMatch(/^__RSD_PUBLIC_HOST__ \{$/m);
+    expect(caddy).not.toMatch(/cloudapp\.azure\.com \{/);
+  });
+
+  it('CSP conferida (sem inline, fontes locais com data:, só /api) e os cabeçalhos que já existiam', () => {
+    expect(caddy).toContain(`Content-Security-Policy "${CSP}"`);
+    expect(caddy).toContain('Strict-Transport-Security "max-age=31536000"');
+    expect(caddy).toContain('X-Content-Type-Options "nosniff"');
+    expect(caddy).toContain('X-Frame-Options "DENY"');
+    expect(caddy).toContain('Referrer-Policy "strict-origin-when-cross-origin"');
+    expect(caddy).toContain('-Server');
+    expect(CSP).not.toMatch(/unsafe-inline|unsafe-eval|\*/);
+  });
+
+  it('mantém o que já existia: compressão, 600 MB, /api para o backend em 127.0.0.1:3000, cache e SPA', () => {
+    expect(caddy).toContain('encode zstd gzip');
+    expect(caddy).toContain('max_size 600MB');
+    expect(caddy).toMatch(/handle_path \/api\/\* \{\n\t\treverse_proxy 127\.0\.0\.1:3000\n\t\}/);
+    expect(caddy).toContain('header @assets Cache-Control "public, max-age=31536000, immutable"');
+    expect(caddy).toContain('header @paginas Cache-Control "no-cache"');
+    expect(caddy).toContain('try_files {path} /index.html');
+    expect(caddy).toContain('storage file_system C:/rsd/caddy/data');
+    expect(caddy).toContain('output file C:/rsd/logs/caddy.log');
+  });
+
+  it('a raiz do frontend é a versão no ar, a mesma pasta que o deploy.ps1 publica', () => {
+    expect(caddy).toContain('root * C:/rsd/app/current/frontend');
+    expect(read('rsd-deploy-common.ps1')).toContain("Current     = Join-Path $Root 'app\\current'");
+    expect(read('deploy.ps1')).toContain("robocopy.exe $FrontendDist (Join-Path $release 'frontend')");
+  });
+
+  it('o backend do Caddy é o endereço que o backend.env de produção usa', () => {
+    const env = read('backend.env.example');
+    expect(env).toContain('HOST="127.0.0.1"');
+    expect(env).toContain('PORT="3000"');
   });
 });
 
