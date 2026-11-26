@@ -198,6 +198,107 @@ function Stop-RsdService {
   }
 }
 
+# Versão anterior à atual (a mais nova entre as mais antigas que ela), para o rollback.
+function Get-PreviousRelease {
+  param([Parameter(Mandatory)]$Paths, [string]$Current = (Get-CurrentRelease $Paths))
+  $older = @(Get-Releases $Paths | Where-Object { $Current -and $_ -lt $Current })
+  if ($older.Count -eq 0) { return $null }
+  return $older[-1]
+}
+
+# Acha uma versão pelo nome completo ou pelo SHA (7 a 40 caracteres).
+function Resolve-Release {
+  param([Parameter(Mandatory)]$Paths, [Parameter(Mandatory)][string]$NameOrSha)
+  $all = @(Get-Releases $Paths)
+  if ($all -contains $NameOrSha) { return $NameOrSha }
+  if ($NameOrSha -match '^[0-9a-f]{7,40}$') {
+    $hits = @($all | Where-Object { $_.EndsWith('-' + $NameOrSha.Substring(0, 7)) })
+    if ($hits.Count -ge 1) { return $hits[-1] }
+  }
+  throw "Versão não encontrada em $($Paths.Releases): $NameOrSha"
+}
+
+<#
+  Troca a versão no ar: para o serviço, aponta "current" para a nova, inicia e confere a saúde.
+  Se a saúde falhar, volta sozinho para a versão anterior (código; o banco não é desfeito) e
+  confere de novo. Os blocos Stop/Start/Health são parâmetros para dar para testar sem serviço.
+  Devolve: Ok, Release (a que ficou no ar), Previous, RolledBack, Message.
+#>
+function Invoke-ReleaseSwitch {
+  param(
+    [Parameter(Mandatory)]$Paths,
+    [Parameter(Mandatory)][string]$NewRelease,
+    [Parameter(Mandatory)][scriptblock]$Stop,
+    [Parameter(Mandatory)][scriptblock]$Start,
+    [Parameter(Mandatory)][scriptblock]$Health
+  )
+  $previous = Get-CurrentRelease $Paths
+  Write-RsdLog "Trocando a versão: $(if ($previous) { $previous } else { '(nenhuma)' }) -> $NewRelease"
+  & $Stop
+  Set-CurrentRelease -Paths $Paths -Name $NewRelease
+  $started = $true
+  try { & $Start } catch { $started = $false; Write-RsdLog "O serviço não iniciou: $($_.Exception.Message)" 'ERROR' }
+  if ($started -and (& $Health)) {
+    return [pscustomobject]@{ Ok = $true; Release = $NewRelease; Previous = $previous; RolledBack = $false; Message = "Versão $NewRelease no ar." }
+  }
+  if (-not $previous) {
+    return [pscustomobject]@{ Ok = $false; Release = $NewRelease; Previous = $null; RolledBack = $false
+      Message = "A versão $NewRelease não passou no health check e não há versão anterior para voltar. Confira o serviço e os logs em C:\rsd\logs." }
+  }
+  Write-RsdLog "Health check falhou: voltando para $previous." 'WARN'
+  & $Stop
+  Set-CurrentRelease -Paths $Paths -Name $previous
+  $back = $true
+  try { & $Start } catch { $back = $false; Write-RsdLog "O serviço não iniciou na versão anterior: $($_.Exception.Message)" 'ERROR' }
+  if ($back -and (& $Health)) {
+    return [pscustomobject]@{ Ok = $false; Release = $previous; Previous = $previous; RolledBack = $true
+      Message = "A versão $NewRelease não passou no health check; rollback automático para $previous (no ar). O banco NÃO foi desfeito." }
+  }
+  return [pscustomobject]@{ Ok = $false; Release = $previous; Previous = $previous; RolledBack = $false
+    Message = "Rollback para $previous também falhou no health check: intervenção manual (rollback.ps1, logs em C:\rsd\logs)." }
+}
+
+# URL do Prisma -> partes para o pg_dump, com a senha separada (vai por PGPASSWORD, não pela linha
+# de comando).
+function Split-PgUrl {
+  param([Parameter(Mandatory)][string]$DatabaseUrl)
+  $m = [regex]::Match($DatabaseUrl, '^postgres(?:ql)?://([^:@/]+)(?::([^@/]*))?@([^:/?]+)(?::(\d+))?/([^?]+)')
+  if (-not $m.Success) { throw 'DATABASE_URL fora do formato postgresql://usuario:senha@host:porta/banco.' }
+  [pscustomobject]@{
+    User     = [uri]::UnescapeDataString($m.Groups[1].Value)
+    Password = [uri]::UnescapeDataString($m.Groups[2].Value)
+    Host     = $m.Groups[3].Value
+    Port     = $(if ($m.Groups[4].Success) { $m.Groups[4].Value } else { '5432' })
+    Database = $m.Groups[5].Value
+  }
+}
+
+<#
+  Confere o site pelo Caddy (só AVISO: não decide rollback). Primeiro pelo domínio público; se a
+  rede do Azure não deixar a VM falar com o próprio IP público, pelo Caddy local (curl --resolve
+  para 127.0.0.1, com o mesmo nome — o certificado continua sendo conferido).
+#>
+function Test-PublicSite {
+  param([Parameter(Mandatory)][string]$PublicHost)
+  $paths = @('/api/health', '/')
+  $viaPublic = $true
+  foreach ($p in $paths) {
+    try { $r = Invoke-WebRequest -UseBasicParsing -Uri "https://$PublicHost$p" -TimeoutSec 10; if ($r.StatusCode -ne 200) { $viaPublic = $false } } catch { $viaPublic = $false }
+  }
+  if ($viaPublic) { return "Site ok pelo domínio público (https://$PublicHost)." }
+  $viaLocal = $true
+  foreach ($p in $paths) {
+    $code = & curl.exe -s -o NUL -w '%{http_code}' --max-time 10 --resolve "${PublicHost}:443:127.0.0.1" "https://$PublicHost$p"
+    if ($code -ne '200') { $viaLocal = $false }
+  }
+  if ($viaLocal) {
+    Write-RsdLog "O domínio público não respondeu de dentro da VM (rede do Azure?); pelo Caddy local, ok." 'WARN'
+    return 'Site ok pelo Caddy local (domínio público sem resposta de dentro da VM).'
+  }
+  Write-RsdLog "O site não respondeu nem pelo domínio público nem pelo Caddy local (https://$PublicHost). O backend está ok; confira o Caddy." 'WARN'
+  return 'Site sem resposta pelo Caddy (só aviso: o backend passou no health check).'
+}
+
 # ---------------------------------------------------------------------------------------------
 # Log: console do job (e transcript) + resumo do GitHub Actions, quando houver.
 # ---------------------------------------------------------------------------------------------

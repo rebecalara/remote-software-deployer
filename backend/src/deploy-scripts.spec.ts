@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -43,6 +43,93 @@ describe('deploy/*.ps1 — arquivos', () => {
       },
       REAL_POWERSHELL_TEST_TIMEOUT_MS,
     );
+  });
+});
+
+/** Só o código: sem o bloco de ajuda (<# #>) nem as linhas de comentário. */
+const codeOf = (name: string) =>
+  read(name)
+    .replace(/<#[\s\S]*?#>/g, '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('#'))
+    .join('\n');
+
+describe('deploy.ps1 — ordem e regras do deploy', () => {
+  const code = codeOf('deploy.ps1');
+
+  it('ordem: build da versão nova → pg_dump → migrações → troca com health check', () => {
+    const build = code.indexOf("Invoke-Native 'nest build'");
+    const dump = code.indexOf('pg_dump.exe');
+    const migrate = code.indexOf("Invoke-Native 'prisma migrate deploy'");
+    const swap = code.indexOf('Invoke-ReleaseSwitch');
+    expect(build).toBeGreaterThan(0);
+    expect(dump).toBeGreaterThan(build);
+    expect(migrate).toBeGreaterThan(dump);
+    expect(swap).toBeGreaterThan(migrate);
+  });
+
+  it('o backend é compilado na VM (motor do Prisma do Windows); o frontend vem do artefato do CI', () => {
+    expect(code).toContain("Invoke-Native 'npm ci'");
+    expect(code).toContain("Invoke-Native 'prisma generate'");
+    expect(code).toContain('robocopy.exe $FrontendDist');
+  });
+
+  it('migração que falha para o deploy sem trocar a versão no ar, apontando o backup', () => {
+    expect(code).toContain('Migração falhou: a versão no ar NÃO foi trocada. Backup de antes: $dump');
+  });
+
+  it('senha do banco: pelo PGPASSWORD (nunca na linha de comando) e apagada depois', () => {
+    expect(code).toContain('$env:PGPASSWORD = $db.Password');
+    expect(code).toContain('--no-password');
+    expect(code).toContain('Remove-Item Env:\\PGPASSWORD');
+    expect(code).toContain('Remove-Item Env:\\DATABASE_URL');
+  });
+
+  it('nunca toca nos instaladores nem no Caddyfile; não lê o backend.env', () => {
+    for (const name of ['deploy.ps1', 'rollback.ps1']) {
+      const c = codeOf(name);
+      expect(c).not.toMatch(/Installers|installers/);
+      expect(c).not.toMatch(/Caddyfile|caddy\.exe|caddy reload/i);
+      expect(c).not.toContain('BackendEnv');
+    }
+    expect(code).toContain('Read-EnvFile $P.DeployEnv');
+  });
+
+  it('o health check que decide o rollback é o do backend; o site pelo Caddy só avisa', () => {
+    expect(code).toContain('-Health { Test-BackendHealth }');
+    expect(code).toMatch(/\$site = if \(\$result\.Ok\) \{ Test-PublicSite/);
+    const common = codeOf('rsd-deploy-common.ps1');
+    const publicFn = common.slice(common.indexOf('function Test-PublicSite'), common.indexOf('function Write-RsdLog'));
+    expect(publicFn).not.toMatch(/throw|exit/);
+    expect(publicFn).toContain('--resolve "${PublicHost}:443:127.0.0.1"');
+  });
+});
+
+describe('.github/workflows/ci.yml — job de deploy', () => {
+  const yml = readFileSync(join(__dirname, '..', '..', '.github', 'workflows', 'ci.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const deploy = yml.slice(yml.indexOf('\n  deploy:'));
+
+  it('só em push na main, depois do backend e do frontend, no runner da APP-RSD, no environment production', () => {
+    expect(deploy).toContain('needs: [backend, frontend]');
+    expect(deploy).toContain("if: github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect(deploy).toContain('runs-on: [self-hosted, windows, rsd-app]');
+    expect(deploy).toContain('environment: production');
+    expect(deploy).toMatch(/concurrency:\s*\n\s*group: deploy-production\s*\n\s*cancel-in-progress: false/);
+    expect(deploy).not.toContain('secrets.');
+  });
+
+  it('nenhum outro job usa o runner self-hosted', () => {
+    expect(yml.match(/runs-on: \[self-hosted/g)).toHaveLength(1);
+    expect(yml.match(/runs-on: ubuntu-24\.04/g)).toHaveLength(3); // backend, frontend e sonar
+  });
+
+  it('na main, um push novo não cancela a execução (que pode estar no meio de um deploy)', () => {
+    expect(yml).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}");
+  });
+
+  it('o frontend que vai para produção é o build que passou nos testes (artefato frontend-dist)', () => {
+    expect(yml).toMatch(/name: frontend-dist\s*\n\s*path: frontend\/dist/);
+    expect(deploy).toMatch(/name: frontend-dist\s*\n\s*path: frontend-dist/);
   });
 });
 
@@ -289,6 +376,139 @@ onWindows('rsd-deploy-common.ps1 — funções (PowerShell de verdade, numa past
       expect(out).toContain('rsd-antes-indices-historico-20261125.sql');
       expect(out).not.toContain('rsd-antes-deploy-20261101-100000-abcdef1.dump');
       expect(out).not.toContain('rsd-antes-deploy-20261102-100000-abcdef1.dump');
+    },
+    T,
+  );
+});
+
+onWindows('troca de versão, rollback e health check (PowerShell de verdade, sem serviço)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rsd-switch-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const T = REAL_POWERSHELL_TEST_TIMEOUT_MS;
+
+  /** Duas versões (a "atual" opcional) e um health check com as respostas dadas, em ordem. */
+  const switchWith = (answers: boolean[], withCurrent = true, startFails = false) =>
+    runPs(`
+      $P = Get-RsdPaths -Root '${dir.replace(/'/g, "''")}'
+      $null = New-Item -ItemType Directory -Path $P.Releases -Force
+      foreach ($n in @('20261125-100000-aaaaaaa', '20261126-100000-bbbbbbb')) { $null = New-Item -ItemType Directory -Path (Join-Path $P.Releases $n) }
+      if (${withCurrent ? '$true' : '$false'}) { Set-CurrentRelease -Paths $P -Name '20261125-100000-aaaaaaa' }
+      $script:answers = @(${answers.map((a) => (a ? '$true' : '$false')).join(', ')}); $script:i = 0; $script:log = @()
+      $r = Invoke-ReleaseSwitch -Paths $P -NewRelease '20261126-100000-bbbbbbb' \`
+        -Stop { $script:log += 'stop' } \`
+        -Start { $script:log += "start:$(Get-CurrentRelease $P)"; if (${startFails ? '$true' : '$false'} -and (Get-CurrentRelease $P) -eq '20261126-100000-bbbbbbb') { throw 'não subiu' } } \`
+        -Health { $script:log += 'health'; $a = $script:answers[$script:i]; $script:i++; $a }
+      ConvertTo-Json @{ ok = $r.Ok; release = $r.Release; previous = $r.Previous; rolledBack = $r.RolledBack; message = $r.Message; current = (Get-CurrentRelease $P); log = $script:log }`) as Record<string, unknown>;
+
+  it(
+    'versão nova saudável: fica no ar',
+    () => {
+      const out = switchWith([true]);
+      expect(out).toMatchObject({ ok: true, rolledBack: false, current: '20261126-100000-bbbbbbb', previous: '20261125-100000-aaaaaaa' });
+      expect(out.log).toEqual(['stop', 'start:20261126-100000-bbbbbbb', 'health']);
+    },
+    T,
+  );
+
+  it(
+    'health check falha: rollback automático para a anterior, que volta ao ar; o job termina com falha',
+    () => {
+      const out = switchWith([false, true]);
+      expect(out).toMatchObject({ ok: false, rolledBack: true, current: '20261125-100000-aaaaaaa', release: '20261125-100000-aaaaaaa' });
+      expect(out.message).toContain('rollback automático');
+      expect(out.message).toContain('O banco NÃO foi desfeito');
+      expect(out.log).toEqual(['stop', 'start:20261126-100000-bbbbbbb', 'health', 'stop', 'start:20261125-100000-aaaaaaa', 'health']);
+    },
+    T,
+  );
+
+  it(
+    'serviço que nem inicia na versão nova também dispara o rollback',
+    () => {
+      const out = switchWith([true], true, true);
+      expect(out).toMatchObject({ ok: false, rolledBack: true, current: '20261125-100000-aaaaaaa' });
+    },
+    T,
+  );
+
+  it(
+    'rollback que também falha: avisa que precisa de intervenção manual',
+    () => {
+      const out = switchWith([false, false]);
+      expect(out).toMatchObject({ ok: false, rolledBack: false });
+      expect(out.message).toContain('intervenção manual');
+    },
+    T,
+  );
+
+  it(
+    'primeiro deploy (sem versão anterior) que falha: não há para onde voltar, e a mensagem diz isso',
+    () => {
+      const out = switchWith([false], false);
+      expect(out).toMatchObject({ ok: false, rolledBack: false, current: '20261126-100000-bbbbbbb' });
+      expect(out.message).toContain('não há versão anterior');
+    },
+    T,
+  );
+
+  it(
+    'rollback.ps1: versão anterior à atual, ou por SHA; SHA desconhecido é recusado',
+    () => {
+      const out = runPs(`
+        $P = Get-RsdPaths -Root '${dir}'
+        $null = New-Item -ItemType Directory -Path $P.Releases -Force
+        foreach ($n in @('20261124-100000-1111111', '20261125-100000-2222222', '20261126-100000-3333333')) { $null = New-Item -ItemType Directory -Path (Join-Path $P.Releases $n) }
+        Set-CurrentRelease -Paths $P -Name '20261126-100000-3333333'
+        $r = @{ previous = (Get-PreviousRelease -Paths $P); bySha = (Resolve-Release -Paths $P -NameOrSha '1111111aaaabbbbccccddddeeeeffff000011112'); byName = (Resolve-Release -Paths $P -NameOrSha '20261125-100000-2222222') }
+        try { Resolve-Release -Paths $P -NameOrSha 'abcdef0' | Out-Null; $r.unknown = 'aceitou' } catch { $r.unknown = $_.Exception.Message }
+        ConvertTo-Json $r`) as Record<string, string>;
+      expect(out.previous).toBe('20261125-100000-2222222');
+      expect(out.bySha).toBe('20261124-100000-1111111');
+      expect(out.byName).toBe('20261125-100000-2222222');
+      expect(out.unknown).toContain('Versão não encontrada');
+    },
+    T,
+  );
+
+  it(
+    'Split-PgUrl: usuário, senha (separada para o PGPASSWORD), host, porta e banco',
+    () => {
+      const out = runPs(`ConvertTo-Json (Split-PgUrl 'postgresql://rsd_owner:Ab_9-x@127.0.0.1:5432/rsd?schema=public')`);
+      expect(out).toEqual({ User: 'rsd_owner', Password: 'Ab_9-x', Host: '127.0.0.1', Port: '5432', Database: 'rsd' });
+    },
+    T,
+  );
+
+  /** Servidor HTTP num processo separado (o spawnSync do PowerShell bloquearia um servidor no Jest). */
+  async function withServer(status: number, body: string, fn: (url: string) => void) {
+    const server = spawn(process.execPath, [
+      '-e',
+      `require('http').createServer((q, s) => { s.writeHead(${status}, { 'Content-Type': 'application/json' }); s.end(${JSON.stringify(body)}); })` +
+        `.listen(0, '127.0.0.1', function () { console.log(this.address().port); });`,
+    ]);
+    try {
+      const port = await new Promise<string>((resolve, reject) => {
+        server.stdout.once('data', (d: Buffer) => resolve(d.toString().trim()));
+        server.once('error', reject);
+      });
+      fn(`http://127.0.0.1:${port}/health`);
+    } finally {
+      server.kill();
+    }
+  }
+
+  it(
+    'Test-BackendHealth: 200 com { status: "ok" } passa; 503 não passa (no tempo limite)',
+    async () => {
+      await withServer(200, '{"status":"ok"}', (url) => {
+        expect(runPs(`ConvertTo-Json (Test-BackendHealth -Url '${url}' -TimeoutSeconds 10)`)).toBe(true);
+      });
+      await withServer(503, '{"status":"error"}', (url) => {
+        expect(runPs(`ConvertTo-Json (Test-BackendHealth -Url '${url}' -TimeoutSeconds 3)`)).toBe(false);
+      });
     },
     T,
   );
