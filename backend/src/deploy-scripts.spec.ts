@@ -925,6 +925,88 @@ onWindows('troca de versão, rollback e health check (PowerShell de verdade, sem
   );
 });
 
+describe('deploy/add-user.ps1 — usuários iniciais (o login nunca cria usuário)', () => {
+  const script = codeOf('add-user.ps1');
+  const common = read('rsd-deploy-common.ps1');
+  const schema = readFileSync(join(DEPLOY, '..', 'backend', 'prisma', 'schema.prisma'), 'utf8').replace(/\r\n/g, '\n');
+
+  it('valida antes de tocar no banco, conecta como rsd_app (backend.env) e a senha só vai pelo PGPASSWORD', () => {
+    expect(script.indexOf('Get-AddUserSql')).toBeLessThan(script.indexOf('Read-EnvFile'));
+    expect(script).toContain("Split-PgUrl (Read-EnvFile $P.BackendEnv)['DATABASE_URL']");
+    expect(script).toContain("if ($db.User -ne 'rsd_app')");
+    expect(script).not.toMatch(/\$P\.DeployEnv\)\['DATABASE_URL'\]/);
+    expect(script).toMatch(/\} finally \{[\s\S]*Remove-Item Env:\\PGPASSWORD/);
+    // Nenhum valor do usuário na linha de comando do psql (-v ou -c): só o arquivo temporário.
+    const psqlLine = script.split('\n').find((l) => l.includes('& $psql'))!;
+    expect(psqlLine).toContain('-f $sql');
+    expect(psqlLine).not.toMatch(/\s-v\s|\s-c\s|\$Username|\$DisplayName/);
+  });
+
+  it('o INSERT tem todas as colunas obrigatórias sem padrão no banco (conferido contra o schema.prisma)', () => {
+    const model = /model User \{([\s\S]*?)\n\}/.exec(schema)![1];
+    const models = new Set([...schema.matchAll(/^model (\w+) \{/gm)].map((m) => m[1]));
+    const required = model
+      .split('\n')
+      .map((l) => /^\s+(\w+)\s+(\w+)(\??)(\[\])?(.*)$/.exec(l))
+      .filter((m): m is RegExpExecArray => !!m && !m[3] && !m[4] && !models.has(m[2]))
+      // @default(uuid()) / cuid() é gerado pelo cliente Prisma, não pelo banco: também entra.
+      .filter((m) => !/@default\((?!uuid\(\)|cuid\(\))/.test(m[5]))
+      .map((m) => m[1]);
+    expect(required).toEqual(expect.arrayContaining(['id', 'username', 'displayName', 'role']));
+    const columns = /INSERT INTO "User" \(([^)]+)\)/.exec(common)![1].split(',').map((c) => c.trim().replace(/"/g, ''));
+    expect([...columns].sort((a, b) => a.localeCompare(b))).toEqual([...required].sort((a, b) => a.localeCompare(b)));
+  });
+
+  onWindows('com o PowerShell de verdade', () => {
+    const sqlFor = (u: string, d: string, r: string) =>
+      runPs(`try { $s = Get-AddUserSql -Username '${u.replace(/'/g, "''")}' -DisplayName '${d.replace(/'/g, "''")}' -Role '${r}'; ConvertTo-Json @{ sql = $s; err = $null } } catch { ConvertTo-Json @{ sql = $null; err = $_.Exception.Message } }`) as {
+        sql: string | null;
+        err: string | null;
+      };
+
+    it(
+      'SQL: confere a tabela, conta antes, INSERT ... ON CONFLICT DO NOTHING com o tipo do enum, e mostra a linha',
+      () => {
+        const { sql, err } = sqlFor('rebeca', '  Rebeca Lara ', 'admin');
+        expect(err).toBeNull();
+        const s = sql!.replace(/\r\n/g, '\n');
+        expect(s).toContain('\\set ON_ERROR_STOP on\n\\encoding UTF8\n');
+        expect(s).toContain(`IF to_regclass('public."User"') IS NULL THEN`);
+        expect(s).toContain(`SELECT 'ANTES|' || count(*) FROM "User" WHERE username = 'rebeca';`);
+        expect(s).toContain(
+          `INSERT INTO "User" (id, username, "displayName", role)\nVALUES (gen_random_uuid(), 'rebeca', 'Rebeca Lara', 'ADMIN'::"UserRole")\nON CONFLICT (username) DO NOTHING;`,
+        );
+        expect(s).toContain(`SELECT 'DEPOIS|' || username || '|' || role::text || '|' || "displayName" FROM "User" WHERE username = 'rebeca';`);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'aspa simples no nome é dobrada (sem injeção); acentos ficam como estão',
+      () => {
+        const { sql } = sqlFor('leitor', "Usuário D'Ávila'); DROP TABLE x; --", 'VIEWER');
+        expect(sql).toContain(`'Usuário D''Ávila''); DROP TABLE x; --', 'VIEWER'::"UserRole"`);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it.each([
+      ['Rebeca', 'Rebeca', 'ADMIN', /só letras minúsculas/],
+      ['rebeca@rsd-demo.local', 'Rebeca', 'ADMIN', /sem @/],
+      ["re'beca", 'Rebeca', 'ADMIN', /só letras minúsculas/],
+      ['a'.repeat(65), 'Rebeca', 'ADMIN', /1 a 64/],
+      ['rebeca', '   ', 'ADMIN', /de 1 a 200/],
+      ['rebeca', 'x'.repeat(201), 'ADMIN', /de 1 a 200/],
+      ['rebeca', 'Rebeca\tLara', 'ADMIN', /caractere de controle/],
+      ['rebeca', 'Rebeca', 'ROOT', /Papel 'ROOT' inválido/],
+    ])('recusa antes do banco: usuário %j, nome %j, papel %j', (u, d, r, msg) => {
+      const { sql, err } = sqlFor(u, d, r);
+      expect(sql).toBeNull();
+      expect(err).toMatch(msg);
+    }, REAL_POWERSHELL_TEST_TIMEOUT_MS);
+  });
+});
+
 describe('permissões do rsd_app — conferência em todo deploy e prova prática', () => {
   it('o deploy confere as permissões DEPOIS da migração e ANTES da troca de versão', () => {
     const code = codeOf('deploy.ps1');

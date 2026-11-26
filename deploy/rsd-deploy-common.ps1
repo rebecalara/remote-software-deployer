@@ -319,6 +319,56 @@ ROLLBACK;
 '@
 }
 
+# ---------------------------------------------------------------------------------------------
+# Usuários do RSD (tabela "User"), usados pelo deploy\add-user.ps1. O login nunca cria usuário:
+# procura o nome digitado, em minúsculas, nesta tabela.
+# ---------------------------------------------------------------------------------------------
+$script:RsdRoles = @('ADMIN', 'OPERATOR', 'VIEWER')
+
+# Confere os dados ANTES de tocar no banco. Devolve o papel em maiúsculas.
+function Assert-RsdUserInput {
+  param([Parameter(Mandatory)][string]$Username, [Parameter(Mandatory)][AllowEmptyString()][string]$DisplayName, [Parameter(Mandatory)][string]$Role)
+  # -cnotmatch: o -match do PowerShell não diferencia maiúsculas, e o banco exige minúsculas.
+  if ($Username -cnotmatch '^[a-z0-9._-]{1,64}$') {
+    throw "Usuário '$Username' inválido: só letras minúsculas, números, '.', '_' e '-' (1 a 64), sem @ (o domínio vem do LDAP_BIND_DN_TEMPLATE)."
+  }
+  if ($DisplayName.Trim().Length -eq 0 -or $DisplayName.Length -gt 200) { throw 'Nome de exibição: de 1 a 200 caracteres.' }
+  if ($DisplayName -match '[\x00-\x1F\x7F]') { throw 'Nome de exibição com caractere de controle.' }
+  $r = $Role.ToUpperInvariant()
+  if ($script:RsdRoles -cnotcontains $r) { throw "Papel '$Role' inválido: $($script:RsdRoles -join ', ')." }
+  return $r
+}
+
+# Texto -> literal SQL (standard_conforming_strings, padrão do PostgreSQL: só a aspa simples é
+# especial, e é dobrada).
+function ConvertTo-SqlLiteral([string]$Text) { return "'" + $Text.Replace("'", "''") + "'" }
+
+# SQL do add-user.ps1. Colunas NOT NULL sem padrão no banco: id, username, "displayName", role
+# (o id do Prisma, @default(uuid()), é gerado pelo cliente; "createdAt" tem DEFAULT no banco).
+# Usuário que já existe não muda. Saída (psql -t -A): "ANTES|<0 ou 1>" e
+# "DEPOIS|<username>|<role>|<displayName>".
+function Get-AddUserSql {
+  param([Parameter(Mandatory)][string]$Username, [Parameter(Mandatory)][string]$DisplayName, [Parameter(Mandatory)][string]$Role)
+  $r = Assert-RsdUserInput -Username $Username -DisplayName $DisplayName -Role $Role
+  $u = ConvertTo-SqlLiteral $Username
+  $d = ConvertTo-SqlLiteral $DisplayName.Trim()
+  $roleLiteral = ConvertTo-SqlLiteral $r
+  return @"
+\set ON_ERROR_STOP on
+\encoding UTF8
+DO `$`$ BEGIN
+  IF to_regclass('public."User"') IS NULL THEN
+    RAISE EXCEPTION 'Tabela "User" não existe: rode o primeiro deploy (migrações) antes.';
+  END IF;
+END `$`$;
+SELECT 'ANTES|' || count(*) FROM "User" WHERE username = $u;
+INSERT INTO "User" (id, username, "displayName", role)
+VALUES (gen_random_uuid(), $u, $d, $roleLiteral::"UserRole")
+ON CONFLICT (username) DO NOTHING;
+SELECT 'DEPOIS|' || username || '|' || role::text || '|' || "displayName" FROM "User" WHERE username = $u;
+"@
+}
+
 # URL do Prisma -> partes para o pg_dump, com a senha separada (vai por PGPASSWORD, não pela linha
 # de comando).
 function Split-PgUrl {

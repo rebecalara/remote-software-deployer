@@ -512,6 +512,25 @@ Stop-Service rsd-backend
 Depois do primeiro deploy (e quando quiser conferir), `.\deploy\check-db-grants.ps1` prova, como
 `rsd_app` e sem mudar nenhuma linha, que o backend lê e grava em todas as tabelas.
 
+### Usuários
+
+O login nunca cria usuário: depois do bind no AD, ele procura o nome digitado, em minúsculas, na
+tabela `User`. Depois do primeiro deploy (que cria as tabelas), cadastre cada pessoa uma vez, como
+administrador na APP-RSD:
+
+```powershell
+.\deploy\add-user.ps1 -Username rebeca   -DisplayName 'Rebeca Lara' -Role ADMIN
+.\deploy\add-user.ps1 -Username operador -DisplayName 'Operador'    -Role OPERATOR
+.\deploy\add-user.ps1 -Username leitor   -DisplayName 'Leitor'      -Role VIEWER
+```
+
+- `-Username` é o que a pessoa digita no login, sem o domínio: o `LDAP_BIND_DN_TEMPLATE`
+  (`{{username}}@rsd-demo.local`) acrescenta o `@rsd-demo.local`. Só minúsculas, números, `.`,
+  `_` e `-`.
+- Conecta como `rsd_app` (a senha vem do `backend.env`) e confere os dados antes de tocar no banco.
+- Pode rodar de novo: um usuário que já existe não é alterado. O script mostra a linha como está e
+  avisa se o papel ou o nome forem diferentes do pedido.
+
 ### Runner self-hosted num repositório público
 
 O runner roda na própria APP-RSD. O risco: num pull request, o workflow que roda é o da branch
