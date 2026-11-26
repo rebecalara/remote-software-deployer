@@ -153,36 +153,97 @@ function Set-RsdAcl {
   Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
-# Direitos de usuário (Fazer logon como serviço / Negar logon...) pela API de política local.
-function Add-AccountRight {
-  param([Parameter(Mandatory)][Security.Principal.SecurityIdentifier]$Sid, [Parameter(Mandatory)][string[]]$Rights)
-  if (-not ('RsdLsa' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System; using System.Runtime.InteropServices;
-public static class RsdLsa {
+# Direitos de usuário (Fazer logon como serviço / Negar logon...) pela API de política local:
+# conceder, retirar e consultar. Classe com nome novo (RsdLsa2): numa mesma janela do PowerShell,
+# uma rodada anterior pode ter carregado a versão antiga, que só concedia.
+function Initialize-RsdLsa {
+  if ('RsdLsa2' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices;
+public static class RsdLsa2 {
   [StructLayout(LayoutKind.Sequential)] struct LSA_UNICODE_STRING { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
   [StructLayout(LayoutKind.Sequential)] struct LSA_OBJECT_ATTRIBUTES { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }
   [DllImport("advapi32.dll")] static extern uint LsaOpenPolicy(IntPtr system, ref LSA_OBJECT_ATTRIBUTES attr, uint access, out IntPtr handle);
   [DllImport("advapi32.dll")] static extern uint LsaAddAccountRights(IntPtr handle, byte[] sid, LSA_UNICODE_STRING[] rights, uint count);
+  [DllImport("advapi32.dll")] static extern uint LsaRemoveAccountRights(IntPtr handle, byte[] sid, [MarshalAs(UnmanagedType.U1)] bool allRights, LSA_UNICODE_STRING[] rights, uint count);
+  [DllImport("advapi32.dll")] static extern uint LsaEnumerateAccountRights(IntPtr handle, byte[] sid, out IntPtr rights, out uint count);
+  [DllImport("advapi32.dll")] static extern uint LsaFreeMemory(IntPtr buffer);
   [DllImport("advapi32.dll")] static extern uint LsaClose(IntPtr handle);
   [DllImport("advapi32.dll")] static extern int LsaNtStatusToWinError(uint status);
-  public static void Add(byte[] sid, string right) {
+  const uint STATUS_OBJECT_NAME_NOT_FOUND = 0xC0000034; // conta sem nenhum direito atribuído
+  static IntPtr Open() {
     var attr = new LSA_OBJECT_ATTRIBUTES(); IntPtr h;
-    uint s = LsaOpenPolicy(IntPtr.Zero, ref attr, 0x00000800 | 0x00000010, out h); // POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES
+    uint s = LsaOpenPolicy(IntPtr.Zero, ref attr, 0x00000800 | 0x00000010, out h); // POLICY_LOOKUP_NAMES | POLICY_CREATE_ACCOUNT
     if (s != 0) throw new System.ComponentModel.Win32Exception(LsaNtStatusToWinError(s));
+    return h;
+  }
+  static void Change(byte[] sid, string right, bool add) {
+    IntPtr h = Open();
     try {
       var u = new LSA_UNICODE_STRING(); u.Buffer = Marshal.StringToHGlobalUni(right);
       u.Length = (ushort)(right.Length * 2); u.MaximumLength = (ushort)(u.Length + 2);
-      try { s = LsaAddAccountRights(h, sid, new[] { u }, 1); } finally { Marshal.FreeHGlobal(u.Buffer); }
+      uint s;
+      try { s = add ? LsaAddAccountRights(h, sid, new[] { u }, 1) : LsaRemoveAccountRights(h, sid, false, new[] { u }, 1); }
+      finally { Marshal.FreeHGlobal(u.Buffer); }
+      if (s != 0 && !(s == STATUS_OBJECT_NAME_NOT_FOUND && !add)) throw new System.ComponentModel.Win32Exception(LsaNtStatusToWinError(s));
+    } finally { LsaClose(h); }
+  }
+  public static void Add(byte[] sid, string right) { Change(sid, right, true); }
+  public static void Remove(byte[] sid, string right) { Change(sid, right, false); }
+  public static string[] List(byte[] sid) {
+    IntPtr h = Open();
+    try {
+      IntPtr buf; uint count;
+      uint s = LsaEnumerateAccountRights(h, sid, out buf, out count);
+      if (s == STATUS_OBJECT_NAME_NOT_FOUND) return new string[0];
       if (s != 0) throw new System.ComponentModel.Win32Exception(LsaNtStatusToWinError(s));
+      try {
+        var result = new List<string>(); int size = Marshal.SizeOf(typeof(LSA_UNICODE_STRING));
+        for (int i = 0; i < count; i++) {
+          var u = (LSA_UNICODE_STRING)Marshal.PtrToStructure(new IntPtr(buf.ToInt64() + i * size), typeof(LSA_UNICODE_STRING));
+          result.Add(Marshal.PtrToStringUni(u.Buffer, u.Length / 2));
+        }
+        return result.ToArray();
+      } finally { LsaFreeMemory(buf); }
     } finally { LsaClose(h); }
   }
 }
 '@
-  }
+}
+
+function Get-SidBytes([Security.Principal.SecurityIdentifier]$Sid) {
   $bytes = New-Object byte[] $Sid.BinaryLength
   $Sid.GetBinaryForm($bytes, 0)
-  foreach ($right in $Rights) { [RsdLsa]::Add($bytes, $right) }
+  return , $bytes
+}
+
+function Add-AccountRight {
+  param([Parameter(Mandatory)][Security.Principal.SecurityIdentifier]$Sid, [Parameter(Mandatory)][string[]]$Rights)
+  Initialize-RsdLsa
+  foreach ($right in $Rights) { [RsdLsa2]::Add((Get-SidBytes $Sid), $right) }
+}
+
+function Remove-AccountRight {
+  param([Parameter(Mandatory)][Security.Principal.SecurityIdentifier]$Sid, [Parameter(Mandatory)][string[]]$Rights)
+  Initialize-RsdLsa
+  foreach ($right in $Rights) { [RsdLsa2]::Remove((Get-SidBytes $Sid), $right) }
+}
+
+function Test-AccountRight {
+  param([Parameter(Mandatory)][Security.Principal.SecurityIdentifier]$Sid, [Parameter(Mandatory)][string]$Right)
+  Initialize-RsdLsa
+  return @([RsdLsa2]::List((Get-SidBytes $Sid))) -contains $Right
+}
+
+# Runner com a configuração local pela metade (registrado no GitHub, mas o config.cmd falhou antes
+# de criar o serviço): apaga SÓ os arquivos de configuração local, para o config.cmd poder registrar
+# de novo (--replace troca o registro órfão no GitHub). O resto da pasta (binários, _diag) fica.
+function Reset-RunnerLocalConfig {
+  param([Parameter(Mandatory)][string]$Dir)
+  foreach ($f in @('.runner', '.credentials', '.credentials_rsaparams')) {
+    $p = Join-Path $Dir $f
+    if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
+  }
 }
 
 function Get-PlainText([Security.SecureString]$Secure) {
@@ -426,7 +487,14 @@ if (-not (Test-Path $P.BackendEnv)) {
 Step "8. Conta local $RunnerAccount e direitos de logon"
 # A senha da conta só é usada ao registrar o runner (passo 12) e não é guardada. Runner já
 # registrado: a senha NÃO é trocada (o serviço do runner continua com a que tem).
+# Registrado = configuração local (.runner) E serviço do runner. Só o .runner, sem serviço, é um
+# registro pela metade: o passo 12 apaga a configuração local e registra de novo.
+$runnerHalfConfigured = $false
 $runnerRegistered = Test-Path (Join-Path $RunnerDir '.runner')
+if ($runnerRegistered -and -not (Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue)) {
+  $runnerRegistered = $false
+  $runnerHalfConfigured = $true
+}
 $runnerPassword = $null
 $runnerUser = Get-LocalUser -Name $RunnerAccount -ErrorAction SilentlyContinue
 if (-not $runnerUser) {
@@ -579,27 +647,36 @@ if ($SkipRunner) {
   if (-not (Test-Path $RunnerDir)) { $null = New-Item -ItemType Directory -Path $RunnerDir }
   Set-RsdAcl -Path $RunnerDir -Rules @(@{ Sid = $RunnerSid; Rights = $M })
   if ($runnerRegistered) {
-    # Já registrado: nada muda (a senha da conta não foi trocada no passo 8). Só garante que roda.
-    $runnerSvc = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $runnerSvc) {
-      throw "Runner registrado em $RunnerDir, mas sem o serviço actions.runner.*. Remova o registro (cd $RunnerDir; .\config.cmd remove --token <token de remoção do GitHub>) e rode o preparo de novo."
-    } else {
-      if ($runnerSvc.Status -ne 'Running') { Start-Service -Name $runnerSvc.Name }
-      Info "Runner já registrado; serviço $($runnerSvc.Name) rodando."
-    }
+    # Já registrado (.runner e serviço): nada muda (a senha da conta não foi trocada no passo 8).
+    $runnerSvc = Get-Service -Name 'actions.runner.*' | Select-Object -First 1
+    if ($runnerSvc.Status -ne 'Running') { Start-Service -Name $runnerSvc.Name }
+    Info "Runner já registrado; serviço $($runnerSvc.Name) rodando."
   } else {
+    if ($runnerHalfConfigured) {
+      Reset-RunnerLocalConfig -Dir $RunnerDir
+      Info 'Registro anterior pela metade (.runner sem serviço): configuração local apagada; o --replace troca o registro no GitHub.'
+    }
     # Senha definida no passo 8 (conta nova, ou senha nova porque o runner ainda não está registrado).
     $zip = Get-VerifiedDownload $Downloads.Runner
     Expand-Archive -LiteralPath $zip -DestinationPath $RunnerDir -Force
     # Vazio nunca chega ao config.cmd: o PowerShell 5.1 descarta argumento vazio, e o runner
     # responderia "Invalid configuration provided for token".
     $token = Read-RunnerToken
+    # O config.cmd confere a senha da conta com LogonUser em modo REDE (actions/runner,
+    # NativeWindowsServiceHelper.IsValidCredential -> LOGON32_LOGON_NETWORK), que o passo 8 nega à
+    # rsd-runner. A negação sai só durante o config.cmd e volta no finally, mesmo se ele falhar; o
+    # serviço do runner entra por logon de serviço, que continua permitido.
+    Remove-AccountRight -Sid $RunnerSid -Rights @('SeDenyNetworkLogonRight')
+    Info "SeDenyNetworkLogonRight da $RunnerAccount suspensa durante o config.cmd."
     Push-Location $RunnerDir
     try {
       & .\config.cmd --unattended --url "https://github.com/$Repo" --token $token --name $env:COMPUTERNAME `
         --labels 'rsd-app' --work '_work' --runasservice --windowslogonaccount ".\$RunnerAccount" --windowslogonpassword $runnerPassword --replace
       if ($LASTEXITCODE -ne 0) { throw "config.cmd do runner falhou (código $LASTEXITCODE). Veja $RunnerDir\_diag; rodar o preparo de novo é seguro." }
-    } finally { Pop-Location; $token = $null }
+    } finally {
+      Pop-Location; $token = $null
+      Add-AccountRight -Sid $RunnerSid -Rights @('SeDenyNetworkLogonRight')
+    }
     $runnerSvc = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not (Test-Path (Join-Path $RunnerDir '.runner')) -or -not $runnerSvc -or $runnerSvc.Status -ne 'Running') {
       throw "config.cmd terminou, mas o runner não ficou registrado e rodando como serviço. Veja $RunnerDir\_diag."
@@ -607,6 +684,11 @@ if ($SkipRunner) {
     Info "Runner registrado (labels: self-hosted, Windows, X64, rsd-app); serviço $($runnerSvc.Name) rodando."
   }
 }
+# A negação de logon pela rede da rsd-runner tem de estar valendo no fim, em qualquer caminho.
+if (-not (Test-AccountRight -Sid $RunnerSid -Right 'SeDenyNetworkLogonRight')) {
+  throw "SeDenyNetworkLogonRight da $RunnerAccount NÃO está valendo. Confira em secpol.msc (Negar acesso a este computador pela rede)."
+}
+Info "SeDenyNetworkLogonRight da ${RunnerAccount}: valendo (sem logon pela rede)."
 
 # =============================================================================================
 Step 'Resumo'

@@ -265,6 +265,48 @@ describe('provision-app.ps1 — regras do preparo', () => {
     expect(step12).toMatch(/if \(-not \(Test-Path \(Join-Path \$RunnerDir '\.runner'\)\) -or -not \$runnerSvc[^\n]*\{\s*throw/);
   });
 
+  // Na VM: "Invalid windows credentials entered" — o config.cmd confere a senha com LogonUser em
+  // modo rede (LOGON32_LOGON_NETWORK), negado à rsd-runner pelo passo 8.
+  it('runner: SeDenyNetworkLogonRight suspensa só durante o config.cmd, devolvida no finally e conferida no fim', () => {
+    const code = codeOf('provision-app.ps1');
+    const step12 = code.slice(code.indexOf('Step "12.'), code.indexOf("Step 'Resumo'"));
+    const remove = step12.indexOf("Remove-AccountRight -Sid $RunnerSid -Rights @('SeDenyNetworkLogonRight')");
+    const config = step12.indexOf('& .\\config.cmd');
+    const fin = step12.indexOf('} finally {', config);
+    const add = step12.indexOf("Add-AccountRight -Sid $RunnerSid -Rights @('SeDenyNetworkLogonRight')");
+    expect(remove).toBeGreaterThan(0);
+    expect(remove).toBeLessThan(config);
+    expect(fin).toBeGreaterThan(config);
+    expect(add).toBeGreaterThan(fin);
+    // DENTRO do finally (volta mesmo se o config.cmd falhar), não depois dele.
+    expect(step12).toMatch(
+      /\} finally \{\s*Pop-Location; \$token = \$null\s*Add-AccountRight -Sid \$RunnerSid -Rights @\('SeDenyNetworkLogonRight'\)\s*\}/,
+    );
+    // Nenhuma outra negação é retirada, em lugar nenhum do script; o passo 8 concede as quatro.
+    expect(code.match(/Remove-AccountRight -Sid[^\n]*/g)).toEqual([
+      "Remove-AccountRight -Sid $RunnerSid -Rights @('SeDenyNetworkLogonRight')",
+    ]);
+    expect(code).toContain(
+      "Add-AccountRight -Sid $RunnerSid -Rights @('SeServiceLogonRight', 'SeDenyInteractiveLogonRight', 'SeDenyRemoteInteractiveLogonRight', 'SeDenyNetworkLogonRight')",
+    );
+    // A conferência final vale para todos os caminhos (inclusive -SkipRunner) e para com erro.
+    const tail = step12.slice(step12.lastIndexOf('Test-AccountRight'));
+    expect(step12.slice(0, step12.lastIndexOf('Test-AccountRight'))).toMatch(/\n\}\n[^\n]*\n?if \(-not \($/);
+    expect(tail).toMatch(/^Test-AccountRight -Sid \$RunnerSid -Right 'SeDenyNetworkLogonRight'\)\) \{\s*throw/);
+    expect(tail).toContain('SeDenyNetworkLogonRight da ${RunnerAccount}: valendo');
+  });
+
+  it('runner registrado pela metade (.runner sem serviço): apaga a configuração local e registra de novo com --replace', () => {
+    const code = codeOf('provision-app.ps1');
+    const step8 = code.slice(code.indexOf('Step "8.'), code.indexOf("Step '9."));
+    expect(step8).toMatch(/if \(\$runnerRegistered -and -not \(Get-Service -Name 'actions\.runner\.\*'[^\n]*\{\s*\$runnerRegistered = \$false\s*\$runnerHalfConfigured = \$true/);
+    const step12 = code.slice(code.indexOf('Step "12.'), code.indexOf("Step 'Resumo'"));
+    expect(step12.indexOf('Reset-RunnerLocalConfig -Dir $RunnerDir')).toBeGreaterThan(0);
+    expect(step12.indexOf('Reset-RunnerLocalConfig -Dir $RunnerDir')).toBeLessThan(step12.indexOf('& .\\config.cmd'));
+    expect(step12).toContain('--replace');
+    expect(step12).not.toContain('config.cmd remove');
+  });
+
   onWindows('funções do preparo no PowerShell de verdade', () => {
     /** Carrega do provision só as funções pedidas (sem rodar o script), com Info/Warn gravando em $log. */
     const withFunctions = (names: string[], body: string) => `
@@ -313,6 +355,53 @@ describe('provision-app.ps1 — regras do preparo', () => {
         expect(fail.token).toBeNull();
         expect(fail.error).toMatch(/não lido em 3 tentativas/);
         expect(fail.log.filter((l) => l.startsWith('INFO'))).toEqual(Array(3).fill('INFO Token lido: 0 caracteres.'));
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'Reset-RunnerLocalConfig: apaga só .runner, .credentials e .credentials_rsaparams (inclusive ocultos)',
+      () => {
+        const dir = mkdtempSync(join(tmpdir(), 'rsd-runner-'));
+        try {
+          const out = runPs(
+            withFunctions(
+              ['Reset-RunnerLocalConfig'],
+              `$d = '${dir}'
+              foreach ($f in '.runner', '.credentials', '.credentials_rsaparams', '.env', 'config.cmd', 'bin\\Runner.Listener.dll', '_diag\\Runner_1.log') {
+                $p = Join-Path $d $f; $null = New-Item -ItemType File -Path $p -Force }
+              (Get-Item -LiteralPath (Join-Path $d '.credentials') -Force).Attributes = 'Hidden'
+              Reset-RunnerLocalConfig -Dir $d
+              Reset-RunnerLocalConfig -Dir $d
+              ConvertTo-Json -Compress @(Get-ChildItem -LiteralPath $d -Recurse -File -Force | ForEach-Object { $_.FullName.Substring($d.Length + 1) })`,
+            ),
+          ) as string[];
+          const byName = (a: string, b: string) => a.localeCompare(b);
+          expect([...out].sort(byName)).toEqual(['_diag\\Runner_1.log', '.env', 'bin\\Runner.Listener.dll', 'config.cmd'].sort(byName));
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'RsdLsa2 compila (conceder, retirar e listar direitos); a leitura roda de verdade quando o teste é administrador',
+      () => {
+        const out = runPs(
+          withFunctions(
+            ['Initialize-RsdLsa', 'Get-SidBytes', 'Test-AccountRight'],
+            `Initialize-RsdLsa
+            $t = [RsdLsa2]
+            $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            $backup = $null
+            if ($admin) { $backup = Test-AccountRight -Sid (New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')) -Right 'SeBackupPrivilege' }
+            ConvertTo-Json -Compress @{ methods = @($t.GetMethods() | Where-Object { $_.IsStatic -and $_.DeclaringType -eq $t } | ForEach-Object Name | Sort-Object); admin = $admin; backup = $backup }`,
+          ),
+        ) as { methods: string[]; admin: boolean; backup: boolean | null };
+        expect(out.methods).toEqual(['Add', 'List', 'Remove']);
+        // Administradores sempre têm SeBackupPrivilege: controle positivo da leitura pela LSA.
+        if (out.admin) expect(out.backup).toBe(true);
       },
       REAL_POWERSHELL_TEST_TIMEOUT_MS,
     );
