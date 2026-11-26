@@ -14,4 +14,10 @@ async function bootstrap() {
   await app.listen(port, host);
   logger.log(`Backend escutando em ${formatListenAddress(app.getHttpServer().address())}`);
 }
-bootstrap();
+// Falha na subida (ex.: banco fora do ar, segredo do JWT fraco): registra o motivo e encerra
+// com código 1, em vez de deixar uma promessa rejeitada sem tratamento.
+bootstrap().catch((err: unknown) => {
+  const logger = new Logger('Bootstrap');
+  logger.error(`O backend não subiu: ${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err.stack : undefined);
+  process.exit(1);
+});

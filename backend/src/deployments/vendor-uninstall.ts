@@ -43,6 +43,17 @@ const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const FORBIDDEN_IN_ARGS = /[&|;<>^%$`]/;
 const FORBIDDEN_IN_EXE = /[%$<>|*?^&;`]/;
 
+/**
+ * Tira as barras invertidas do fim ("C:\Program Files\\" → "C:\Program Files"). Laço do fim
+ * para trás, linear: a regex /\\+$/ fazia retrocesso (tempo quadrático) com muitas barras
+ * seguidas de outro caractere.
+ */
+export function trimTrailingBackslashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '\\') end--;
+  return value.slice(0, end);
+}
+
 /** Separa e valida o comando. Função pura: o PowerShell implementa as mesmas regras. */
 export function checkUninstallCommand(command: string, roots: string[] = DEFAULT_ALLOWED_ROOTS): CommandCheck {
   const fail = (reason: string): CommandCheck => ({ ok: false, reason });
@@ -79,7 +90,7 @@ export function checkUninstallCommand(command: string, roots: string[] = DEFAULT
 
   const lower = exe.toLowerCase();
   const inRoot = roots.some((root) => {
-    const r = root.replace(/\\+$/, '').toLowerCase();
+    const r = trimTrailingBackslashes(root).toLowerCase();
     return r !== '' && lower.startsWith(`${r}\\`);
   });
   if (!inRoot) return fail('O executável precisa estar dentro de Program Files ou Program Files (x86).');

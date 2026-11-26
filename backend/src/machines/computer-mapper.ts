@@ -93,7 +93,7 @@ function unescapeDnValue(value: string): string {
   for (let i = 0; i < value.length; i++) {
     const hex = value.slice(i + 1, i + 3);
     if (value[i] === '\\' && /^[0-9a-fA-F]{2}$/.test(hex)) {
-      bytes.push(parseInt(hex, 16));
+      bytes.push(Number.parseInt(hex, 16));
       i += 2;
     } else if (value[i] === '\\' && i + 1 < value.length) {
       bytes.push(...Buffer.from(value[i + 1], 'utf8'));

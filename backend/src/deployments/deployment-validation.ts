@@ -19,7 +19,7 @@ export const MAX_NAME_LENGTH = 120;
 export function parseMaxMachines(raw: string | undefined, warn?: (msg: string) => void): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_MACHINES;
   const text = raw.trim();
-  const value = /^\d+$/.test(text) ? Number(text) : NaN;
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
   if (!Number.isSafeInteger(value) || value < 1) {
     warn?.(`DEPLOYMENT_MAX_MACHINES inválido ("${raw}"); usando ${DEFAULT_MAX_MACHINES}.`);
     return DEFAULT_MAX_MACHINES;

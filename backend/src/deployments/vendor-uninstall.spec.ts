@@ -6,6 +6,7 @@ import {
   UNINSTALL_RULES_SCRIPT_PATH,
   checkUninstallCommand,
   programId,
+  trimTrailingBackslashes,
   vendorUninstallEnabled,
 } from './vendor-uninstall';
 import { REAL_POWERSHELL_TEST_TIMEOUT_MS } from './testing/real-powershell';
@@ -32,6 +33,31 @@ describe('checkUninstallCommand (servidor)', () => {
       expect(r.ok).toBe(false);
       expect('reason' in r && r.reason).toContain(c.reason);
     }
+  });
+});
+
+describe('raízes permitidas com barras no fim', () => {
+  const EXE = '"C:\\Program Files\\7-Zip\\Uninstall.exe" /S';
+
+  it('raiz "C:\\Program Files\\\\\\\\" (várias barras no fim) continua aceitando o executável dentro dela', () => {
+    expect(checkUninstallCommand(EXE, ['C:\\Program Files\\\\\\\\'])).toMatchObject({ ok: true });
+  });
+
+  it('raiz feita só de barras é ignorada (não vira "qualquer caminho")', () => {
+    expect(checkUninstallCommand(EXE, ['\\\\\\'])).toMatchObject({ ok: false });
+  });
+
+  it('trimTrailingBackslashes tira só as barras do fim', () => {
+    expect(trimTrailingBackslashes('C:\\Program Files\\\\\\\\')).toBe('C:\\Program Files');
+    expect(trimTrailingBackslashes('C:\\Program Files')).toBe('C:\\Program Files');
+    expect(trimTrailingBackslashes('\\\\')).toBe('');
+  });
+
+  it('tempo linear: 100 mil barras seguidas de outro caractere não travam (a regex antiga retrocedia)', () => {
+    const evil = `${'\\'.repeat(100_000)}x`;
+    const t0 = Date.now();
+    expect(trimTrailingBackslashes(evil)).toBe(evil);
+    expect(Date.now() - t0).toBeLessThan(50);
   });
 });
 

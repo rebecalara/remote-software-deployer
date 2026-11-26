@@ -146,7 +146,7 @@ export function NewDeploymentPage() {
   const chosen = software?.find((s) => s.id === softwareId) ?? null;
   const overLimit = maxMachines !== null && selected.size > maxMachines;
   const uninstall = action === 'UNINSTALL';
-  const selectedKey = [...selected].sort().join(',');
+  const selectedKey = [...selected].sort((a, b) => a.localeCompare(b)).join(',');
 
   const loadSummary = useCallback(async () => {
     const ids = selectedKey ? selectedKey.split(',') : [];

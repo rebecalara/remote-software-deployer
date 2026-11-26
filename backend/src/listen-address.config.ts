@@ -26,7 +26,7 @@ export function parsePort(raw: string | undefined, logger?: Logger): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_PORT;
   const text = raw.trim();
   // Só dígitos: Number() aceitaria "1e3", "0x10" e "+3000".
-  const value = /^\d+$/.test(text) ? Number(text) : NaN;
+  const value = /^\d+$/.test(text) ? Number(text) : Number.NaN;
   if (!Number.isInteger(value) || value < MIN_PORT || value > MAX_PORT) {
     logger?.warn(`PORT inválido ("${raw}"): precisa ser um inteiro de ${MIN_PORT} a ${MAX_PORT}; usando ${DEFAULT_PORT}.`);
     return DEFAULT_PORT;
