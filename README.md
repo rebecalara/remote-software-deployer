@@ -466,12 +466,16 @@ na hora (conta do serviço, token do runner) e não são guardadas em arquivo.
    continua a mesma.
 4. **Permissões do `rsd_app`** conferidas em todas as tabelas e sequências. Se faltar alguma, o
    deploy para sem trocar a versão.
-5. **Troca:** o serviço para, `C:\rsd\app\current` (uma junção) passa a apontar para a versão nova,
+5. **Só dependências de produção:** `npm prune --omit=dev` na versão nova. As de desenvolvimento
+   (Jest, CLI do Nest, TypeScript…) só servem ao build e apareceriam como vulnerabilidades do app
+   no New Relic sem nunca rodar. O script confere que o `@prisma/client` (com o motor gerado), o
+   Nest e o agente continuam lá; se o prune falhar, o deploy para sem trocar a versão.
+6. **Troca:** o serviço para, `C:\rsd\app\current` (uma junção) passa a apontar para a versão nova,
    o serviço sobe e `http://127.0.0.1:3000/health` tem de responder `{ "status": "ok" }` em até 60 s.
-6. **Site pelo Caddy:** confere `https://<domínio>/` e `/api/health`. De dentro da VM, o domínio
+7. **Site pelo Caddy:** confere `https://<domínio>/` e `/api/health`. De dentro da VM, o domínio
    público pode não responder (rede do Azure); aí confere pelo Caddy local. Isso só gera aviso:
    quem decide o rollback é o health check do backend.
-7. **Limpeza:** ficam as últimas 5 versões e os últimos 10 backups de deploy. Os instaladores
+8. **Limpeza:** ficam as últimas 5 versões e os últimos 10 backups de deploy. Os instaladores
    (`C:\rsd\data\installers`) nunca são tocados.
 
 ### Rollback

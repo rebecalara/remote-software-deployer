@@ -6,7 +6,9 @@
      frontend já compilado no CI (artefato), e faz o build do backend AQUI (npm ci, prisma
      generate, nest build) — node_modules e o motor do Prisma são os do Windows.
   2. pg_dump do banco (papel rsd_owner) em C:\rsd\data\backups.
-  3. prisma migrate deploy. Se falhar, para: a versão no ar não é trocada.
+  3. prisma migrate deploy. Se falhar, para: a versão no ar não é trocada. Depois, confere as
+     permissões do rsd_app e tira as dependências de desenvolvimento da versão nova
+     (npm prune --omit=dev); qualquer falha também para antes da troca.
   4. Troca: para o serviço, aponta C:\rsd\app\current para a nova, inicia e confere
      http://127.0.0.1:3000/health. Se falhar, ROLLBACK automático para a anterior (o código; o banco
      não é desfeito — por isso as migrações só acrescentam, ver README).
@@ -115,6 +117,26 @@ try {
   $problems = (($problems | Out-String).Trim())
   if ($problems) { throw "O papel rsd_app não tem permissão em: $problems. A versão no ar NÃO foi trocada; rode o provision-app.ps1 (permissões padrão) e repita o deploy." }
   Write-RsdLog 'Permissões do rsd_app conferidas em todas as tabelas e sequências.'
+
+  # ------------------------------------------------------------------ 3c. só dependências de produção
+  # O npm ci do passo 1 instalou também as de desenvolvimento (nest build, jest, ts-jest...), que
+  # o build e o prisma generate precisam. Na versão que vai ao ar ficam só as de produção: as de
+  # desenvolvimento apareceriam como vulnerabilidades do app no New Relic (handlebars, picomatch)
+  # sem nunca rodar. Depois das migrações, porque o CLI do prisma é usado nelas. Se falhar, para
+  # sem trocar a versão no ar.
+  Push-Location $backendDir
+  try {
+    Invoke-Native 'npm prune --omit=dev' { & npm.cmd prune --omit=dev --no-audit --no-fund }
+    foreach ($need in @('node_modules\@prisma\client', 'node_modules\.prisma\client\index.js', 'node_modules\@nestjs\core', 'node_modules\newrelic')) {
+      if (-not (Test-Path -LiteralPath $need)) { throw "falta $need depois do prune." }
+    }
+    foreach ($dev in @('node_modules\jest', 'node_modules\ts-jest', 'node_modules\@nestjs\cli', 'node_modules\typescript')) {
+      if (Test-Path -LiteralPath $dev) { throw "$dev continua lá depois do prune." }
+    }
+  } catch {
+    throw "Limpeza das dependências de desenvolvimento falhou: a versão no ar NÃO foi trocada. Detalhe: $($_.Exception.Message)"
+  } finally { Pop-Location }
+  Write-RsdLog 'Dependências de desenvolvimento removidas da versão nova (npm prune --omit=dev).'
 
   # ------------------------------------------------------------------ 4. troca + health check
   $result = Invoke-ReleaseSwitch -Paths $P -NewRelease $name `
