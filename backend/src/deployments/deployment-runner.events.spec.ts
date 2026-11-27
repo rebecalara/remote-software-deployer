@@ -31,7 +31,7 @@ describe('DeploymentRunner.finalizeDeployment — evento deployment.finished', (
       {
         'security.event': 'deployment.finished',
         'security.result': 'success',
-        'security.pii': true,
+        'security.pii': false,
         'deployment.id': 'd-1',
         'deployment.status': 'PARTIAL',
         'deployment.machines': 3,

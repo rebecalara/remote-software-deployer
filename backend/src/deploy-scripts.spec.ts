@@ -79,6 +79,32 @@ describe('deploy.ps1 — ordem e regras do deploy', () => {
     expect(code).toContain('Migração falhou: a versão no ar NÃO foi trocada. Backup de antes: $dump');
   });
 
+  // O New Relic acusava handlebars e picomatch (só de desenvolvimento: ts-jest, jest, @nestjs/cli)
+  // porque a versão ia ao ar com o node_modules completo do npm ci.
+  it('dependências de desenvolvimento saem da versão nova DEPOIS das migrações e ANTES da troca', () => {
+    const migrate = code.indexOf("Invoke-Native 'prisma migrate deploy'");
+    const grants = code.indexOf('Permissões do rsd_app conferidas');
+    const prune = code.indexOf("Invoke-Native 'npm prune --omit=dev' { & npm.cmd prune --omit=dev --no-audit --no-fund }");
+    const swap = code.indexOf('Invoke-ReleaseSwitch');
+    expect(prune).toBeGreaterThan(migrate); // o CLI do prisma é usado na migração
+    expect(prune).toBeGreaterThan(grants);
+    expect(swap).toBeGreaterThan(prune);
+    // Roda na pasta da versão nova, não na que está no ar.
+    expect(code.slice(code.lastIndexOf('Push-Location', prune), prune)).toContain('Push-Location $backendDir');
+  });
+
+  it('prune que falha (ou que tira algo de execução, ou deixa algo de desenvolvimento) para antes da troca', () => {
+    const step = code.slice(code.indexOf("Invoke-Native 'npm prune --omit=dev'"), code.indexOf('Invoke-ReleaseSwitch'));
+    for (const need of ['node_modules\\@prisma\\client', 'node_modules\\.prisma\\client\\index.js', 'node_modules\\@nestjs\\core', 'node_modules\\newrelic']) {
+      expect(step).toContain(`'${need}'`);
+    }
+    for (const dev of ['node_modules\\jest', 'node_modules\\ts-jest', 'node_modules\\@nestjs\\cli', 'node_modules\\typescript']) {
+      expect(step).toContain(`'${dev}'`);
+    }
+    expect(step).toMatch(/\} catch \{\s*throw "Limpeza das dependências de desenvolvimento falhou: a versão no ar NÃO foi trocada\./);
+    expect(step).toMatch(/\} finally \{ Pop-Location \}/);
+  });
+
   it('senha do banco: pelo PGPASSWORD (nunca na linha de comando) e apagada depois', () => {
     expect(code).toContain('$env:PGPASSWORD = $db.Password');
     expect(code).toContain('--no-password');

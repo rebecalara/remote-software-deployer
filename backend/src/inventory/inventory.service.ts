@@ -22,6 +22,7 @@ import {
 } from '../deployments/vendor-uninstall';
 import { isSeenInLastSync } from '../machines/machines.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { userForLogs } from '../observability/security-events';
 
 // RF08: inventário de software por máquina (DECISIONS.md). Consulta AO VIVO pelo WinRM,
 // com o script fixo e só de leitura inventory-target.ps1, a mesma credencial e o mesmo
@@ -273,12 +274,12 @@ export class InventoryService implements OnModuleInit {
       this.startWaitingRefresh();
     }
     if ('reason' in result) {
-      this.logger.warn(`Inventário de ${machine.hostname} (por ${username}) falhou: ${result.reason} — ${result.message}`);
+      this.logger.warn(`Inventário de ${machine.hostname} (por ${userForLogs(username)}) falhou: ${result.reason} — ${result.message}`);
       throw inventoryFailureToHttp(result.reason, result.message);
     }
 
     const row = await this.save(machineId, userId, result.items);
-    this.logger.log(`Inventário de ${machine.hostname} consultado por ${username}: ${result.items.length} itens.`);
+    this.logger.log(`Inventário de ${machine.hostname} consultado por ${userForLogs(username)}: ${result.items.length} itens.`);
     return this.toView(row);
   }
 

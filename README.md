@@ -466,12 +466,16 @@ na hora (conta do serviço, token do runner) e não são guardadas em arquivo.
    continua a mesma.
 4. **Permissões do `rsd_app`** conferidas em todas as tabelas e sequências. Se faltar alguma, o
    deploy para sem trocar a versão.
-5. **Troca:** o serviço para, `C:\rsd\app\current` (uma junção) passa a apontar para a versão nova,
+5. **Só dependências de produção:** `npm prune --omit=dev` na versão nova. As de desenvolvimento
+   (Jest, CLI do Nest, TypeScript…) só servem ao build e apareceriam como vulnerabilidades do app
+   no New Relic sem nunca rodar. O script confere que o `@prisma/client` (com o motor gerado), o
+   Nest e o agente continuam lá; se o prune falhar, o deploy para sem trocar a versão.
+6. **Troca:** o serviço para, `C:\rsd\app\current` (uma junção) passa a apontar para a versão nova,
    o serviço sobe e `http://127.0.0.1:3000/health` tem de responder `{ "status": "ok" }` em até 60 s.
-6. **Site pelo Caddy:** confere `https://<domínio>/` e `/api/health`. De dentro da VM, o domínio
+7. **Site pelo Caddy:** confere `https://<domínio>/` e `/api/health`. De dentro da VM, o domínio
    público pode não responder (rede do Azure); aí confere pelo Caddy local. Isso só gera aviso:
    quem decide o rollback é o health check do backend.
-7. **Limpeza:** ficam as últimas 5 versões e os últimos 10 backups de deploy. Os instaladores
+8. **Limpeza:** ficam as últimas 5 versões e os últimos 10 backups de deploy. Os instaladores
    (`C:\rsd\data\installers`) nunca são tocados.
 
 ### Rollback
@@ -621,6 +625,10 @@ A VM precisa sair pela porta 443 até o New Relic (`collector.newrelic.com`, ou
 - **Valores das consultas ao banco:** ocultos (`record_sql: obfuscated`), sem coleta de SQL lento.
 - **A senha do login** nunca é registrada pelo backend; a senha do WinRM e a do banco também não.
 
+**Taxa de erro do APM:** 401, 403 e 404 não contam como erro (`error_collector.ignore_status_codes`).
+São respostas esperadas — sessão vencida, senha errada, perfil sem permissão —, e os 401/403
+continuam registrados como eventos de segurança. Os 5xx continuam contando.
+
 O agente de navegador (*Browser*) não é usado: exigiria abrir a Content-Security-Policy para script
 e conexão de terceiros, e enviaria as URLs visitadas (com os filtros) para fora.
 
@@ -646,11 +654,12 @@ campo de usuário). Um evento que falha nunca derruba a rota. Consulta no New Re
 FROM Log SELECT count(*) WHERE security.event = 'auth.login' AND security.result = 'failure' FACET client.ip SINCE 1 day ago
 ```
 
-**Privacidade (LGPD):** `SECURITY_EVENTS_INCLUDE_PII` (padrão `true`, que é o caso da demo). Com
-`false`, o usuário vira um hash curto (SHA-256 com o `JWT_SECRET` como sal, 12 caracteres) e o IP
-vira o prefixo de rede (`/24`). **No piloto da Prefeitura, isso deve ser decidido com a TI antes de
-ligar o New Relic**: com `true`, nomes de usuário e IPs dos operadores ficam guardados num serviço
-de fora.
+**Privacidade (LGPD):** `SECURITY_EVENTS_INCLUDE_PII`, padrão `false`: o usuário vira um hash
+curto (SHA-256 com o `JWT_SECRET` como sal, 12 caracteres) e o IP vira o prefixo de rede (`/24`),
+nos eventos de segurança **e nos logs comuns** (login, inventário) — o pseudônimo é o mesmo nos dois,
+para cruzar um log com o evento. Só `true` mostra usuário e IP em texto. **No piloto da
+Prefeitura, isso deve ser decidido com a TI antes de ligar o New Relic**: com `true`, nomes de
+usuário e IPs dos operadores ficam guardados num serviço de fora.
 
 **Conferir que nenhum segredo sai** (`deploy\check-newrelic-secrets.ps1`, como administrador):
 

@@ -78,7 +78,8 @@ describe('eventos de segurança pelo HTTP (o que chega ao New Relic)', () => {
   beforeEach(() => {
     sent = [];
     for (const m of [authLogin, createDeployment, cancelDeployment, createSoftware]) m.mockReset();
-    delete process.env.SECURITY_EVENTS_INCLUDE_PII;
+    // Estes testes conferem o usuário e o IP em texto: PII ligado de propósito (o padrão é false).
+    process.env.SECURITY_EVENTS_INCLUDE_PII = 'true';
   });
 
   it('login recusado: evento "failure" com usuário e IP real (via Caddy), e a senha em lugar nenhum', async () => {
