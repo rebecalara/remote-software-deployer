@@ -155,11 +155,11 @@ Na Nova Implantação, o passo do software tem a escolha **Instalar / Desinstala
 
 | | |
 |---|---|
-| **Login** com a conta de rede<br/>![Login](docs/img/01-login.png) | **Máquinas** sincronizadas com o AD, com o painel de detalhes<br/>![Máquinas](docs/img/03-maquinas.png) |
-| **Catálogo de Software**: tipo, tamanho e implantações<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Implantação**, revisão com o comando exato que será executado<br/>![Nova Implantação](docs/img/05-nova-instalacao-revisao.png) |
-| **Monitoramento**, com a implantação expandida na própria linha e o log da máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros, uma implantação parcial expandida<br/>![Histórico](docs/img/07-historico.png) |
-| **Desinstalação** (só MSI), revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | **Software instalado** na máquina (RF08), consultado ao vivo<br/>![Inventário](docs/img/09-inventario.png) |
-| **Desinstalação pelo inventário**: MSI fora do catálogo, em quantas máquinas está, "Consultar agora"<br/>![Desinstalação pelo inventário](docs/img/10-desinstalacao-inventario.png) | |
+| **Login** com a conta de rede<br/>![Login](docs/img/01-login.png) | **Máquinas** sincronizadas com o AD, com o setor e o status do WinRM<br/>![Máquinas](docs/img/03-maquinas.png) |
+| **Catálogo de Software**: tipo, versão, implantações e tamanho, com o painel de um software já implantado<br/>![Catálogo](docs/img/04-catalogo.png) | **Nova Implantação**, revisão com o comando exato que será executado<br/>![Nova Implantação](docs/img/05-nova-instalacao-revisao.png) |
+| **Monitoramento**: uma implantação "Parcial" aberta na própria linha, com o status de cada máquina<br/>![Monitoramento](docs/img/06-monitoramento.png) | **Histórico** com filtros e uma implantação com falha aberta: o log da máquina mostra a cópia do instalador recusada (SMB, porta 445)<br/>![Histórico](docs/img/07-historico.png) |
+| **Desinstalação** de um MSI, revisão com o comando exato<br/>![Desinstalação](docs/img/08-desinstalacao-revisao.png) | **Software instalado** na máquina (RF08), consultado ao vivo, no painel de detalhes ("Atualizado agora")<br/>![Inventário](docs/img/09-inventario.png) |
+| **Desinstalação pelo inventário**: o produto encontrado na máquina, com o ProductCode e em quantas das máquinas selecionadas está<br/>![Desinstalação pelo inventário](docs/img/10-desinstalacao-inventario.png) | |
 
 Os prints foram feitos no ambiente de desenvolvimento, só com dados fictícios: as
 máquinas `WS-*` vêm do OpenLDAP local, e a `RSD-ALVO-01` é uma VM de laboratório. O
