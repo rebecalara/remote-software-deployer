@@ -50,8 +50,10 @@ exports.config = {
     metrics: { enabled: true },
   },
 
-  // Sem o agente de segurança (IAST) e sem o audit log (só ligado por NEW_RELIC_AUDIT_LOG_ENABLED
-  // durante a conferência do deploy\check-newrelic-secrets.ps1).
+  // Sem o agente de segurança (IAST) e sem o audit log. Na conferência do
+  // deploy\check-newrelic-secrets.ps1 usa-se NEW_RELIC_LOG_LEVEL='trace': no 14.12.0 o audit_log é
+  // ignorado (Logger.prototype.configure, lib/util/logger.js, não copia auditLogging), e o agente
+  // grava os envios em trace.
   security: { enabled: false, agent: { enabled: false } },
   audit_log: { enabled: false },
 
