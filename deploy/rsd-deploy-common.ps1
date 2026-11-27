@@ -394,21 +394,45 @@ function Get-BackendSecrets {
   return $list.ToArray() # um item por segredo no pipeline (quem chama usa @(...))
 }
 
-# Conta, linha a linha, onde cada segredo aparece. A chave do New Relic tem ocorrências ESPERADAS:
-# o agente a envia ao coletor (license_key= na URL, cabeçalho X-License-Key, campo license_key), e o
-# audit log registra esse transporte. Fora desses contextos — por exemplo dentro de um log ou evento
-# enviado — conta como vazamento. Os outros segredos: qualquer ocorrência é vazamento.
+# Texto que o agente grava a cada envio ao coletor (newrelic 14.12.0, lib/collector/remote-method.js,
+# com o log em trace). Sem nenhuma linha assim, a conferência não viu envio nenhum: é inconclusiva.
+$script:AgentPostMarker = 'Posting to'
+
+# Linhas com envio do agente ao coletor.
+function Measure-AgentPosts {
+  param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines)
+  return @($Lines | Where-Object { $_ -and $_.Contains($script:AgentPostMarker) }).Count
+}
+
+# Logs da conferência: os que mudaram desde a subida do serviço E, sempre, o rsd-backend.out.log e o
+# rsd-backend.err.log do WinSW. Com o serviço segurando o arquivo aberto, o Windows não atualiza o
+# LastWriteTime nem o tamanho na listagem (visto na APP-RSD: 9:27 com o serviço subindo às 9:31), e
+# o arquivo principal ficava de fora.
+function Get-NewRelicCheckFiles {
+  param([Parameter(Mandatory)][string]$LogDir, [Parameter(Mandatory)][datetime]$Since, [string]$ServiceName = 'rsd-backend')
+  $always = @("$ServiceName.out.log", "$ServiceName.err.log")
+  return @(Get-ChildItem -LiteralPath $LogDir -File -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { $_.LastWriteTime -ge $Since -or $always -contains $_.Name } | Sort-Object FullName)
+}
+
+# Conta, linha a linha, onde cada segredo aparece. Qualquer ocorrência é vazamento, com UMA exceção
+# para a chave do New Relic: como valor de "license_key" no JSON de configuração do agente, numa linha
+# "Posting to". No 14.12.0, o corpo dos métodos connect e agent_settings é o config.publicSettings()
+# (lib/collector/facts.js e api.js), que só mascara proxy e certificados: a chave vai em texto, só
+# para o coletor (collector.newrelic.com). No log, esse corpo é uma string dentro do JSON, então as
+# aspas podem vir escapadas (\"license_key\":\"...\"). Na URL do "Posting to" a chave já sai mascarada
+# (redacted_license_key); a chave em texto em qualquer outro lugar é vazamento.
 function Find-SecretOccurrences {
   param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Secrets)
   $results = foreach ($s in $Secrets) {
     $escaped = [regex]::Escape($s.Value)
-    $expectedContexts = "(?i)(license_key=$escaped|`"license_key`"\s*:\s*`"$escaped`"|x-license-key`"?\s*[:=]\s*`"?$escaped)"
+    $expectedContexts = '\\*"license_key\\*"\s*:\s*\\*"' + $escaped + '\\*"'
     $expected = 0; $leaks = 0; $leakLines = New-Object Collections.Generic.List[int]
     for ($i = 0; $i -lt $Lines.Count; $i++) {
       $line = $Lines[$i]
       if ($null -eq $line -or -not $line.Contains($s.Value)) { continue }
       $rest = $line
-      if ($s.Name -eq $script:NewRelicLicenseName) {
+      if ($s.Name -eq $script:NewRelicLicenseName -and $line.Contains($script:AgentPostMarker)) {
         $expectedHere = ([regex]::Matches($line, $expectedContexts)).Count
         $expected += $expectedHere
         $rest = [regex]::Replace($line, $expectedContexts, '')

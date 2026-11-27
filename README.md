@@ -663,16 +663,26 @@ usuário e IPs dos operadores ficam guardados num serviço de fora.
 
 **Conferir que nenhum segredo sai** (`deploy\check-newrelic-secrets.ps1`, como administrador):
 
-1. No `backend.env`, acrescente `NEW_RELIC_AUDIT_LOG_ENABLED='true'` e rode
-   `Restart-Service rsd-backend`. O agente passa a escrever no log tudo o que envia.
+1. No `backend.env`, acrescente `NEW_RELIC_LOG_LEVEL='trace'` e rode `Restart-Service rsd-backend`.
+   Em trace, o agente grava no log cada envio ao New Relic (`Posting to …`, com o corpo). Não use
+   `NEW_RELIC_AUDIT_LOG_ENABLED`: no `newrelic` 14.12.0 ele é ignorado
+   (`Logger.prototype.configure`, em `lib/util/logger.js`, não copia o `auditLogging`), e nada é
+   gravado.
 2. Faça um login com senha errada (anote a senha de teste), um login certo, uma ação proibida para
    o perfil e, se quiser, uma implantação. Espere uns 2 minutos.
-3. Rode `.\deploy\check-newrelic-secrets.ps1`. Ele procura cada segredo do `backend.env` (e a senha
-   de teste) nos logs de `C:\rsd\logs` desde a subida do serviço e mostra só nomes, contagens e
-   linhas, nunca o valor. A chave do New Relic no transporte ao coletor (`license_key=` na URL,
-   cabeçalho `X-License-Key`) é esperada; em qualquer outro lugar, conta como vazamento.
-4. O script oferece apagar os logs do período (digite `SIM`) e lembra de **desligar o audit log**:
-   tire a linha do `backend.env` e reinicie o serviço.
+3. Rode `.\deploy\check-newrelic-secrets.ps1`. Ele lê os logs de `C:\rsd\logs` alterados desde a
+   subida do serviço e, **sempre**, o `rsd-backend.out.log` e o `rsd-backend.err.log` (com o serviço
+   segurando o arquivo aberto, o Windows não atualiza a data na listagem). Mostra o tamanho lido de
+   cada arquivo e quantos envios do agente encontrou, e procura cada segredo do `backend.env` (e a
+   senha de teste) — só nomes, contagens e linhas, nunca o valor.
+   - A chave do New Relic tem **uma** ocorrência esperada: como valor de `license_key` no JSON de
+     configuração que o agente manda ao coletor (métodos `connect` e `agent_settings`, que no
+     14.12.0 vão com a chave em texto, só para `collector.newrelic.com`). Em qualquer outro lugar,
+     conta como vazamento.
+   - Saída: `0` sem vazamento; `1` vazamento; `2` **INCONCLUSIVO**, sem nenhum envio
+     `Posting to` gravado (o log não estava em trace ou o agente não enviou nada).
+4. O script oferece apagar os logs do período (digite `SIM`) e lembra de **tirar o
+   `NEW_RELIC_LOG_LEVEL`** do `backend.env` e reiniciar o serviço (em trace, o log cresce muito).
 
 **Monitor de disponibilidade (no site do New Relic, sem código):**
 

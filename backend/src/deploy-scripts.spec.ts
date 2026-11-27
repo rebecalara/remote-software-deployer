@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as dotenvParse } from 'dotenv';
@@ -1046,14 +1046,33 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
     expect(script).toMatch(/Read-Host -AsSecureString 'Senha de teste/);
   });
 
-  it('apagar os logs só com confirmação explícita (SIM), e sempre lembra de desligar o audit log', () => {
+  it('apagar os logs só com confirmação explícita (SIM), e sempre lembra de tirar o NEW_RELIC_LOG_LEVEL', () => {
     const ask = script.indexOf("Read-Host 'Apagar esses arquivos agora?");
     const remove = script.indexOf('Remove-Item -LiteralPath $f.FullName');
     expect(ask).toBeGreaterThan(0);
     expect(remove).toBeGreaterThan(ask);
     expect(script).toContain("if ($answer -ceq 'SIM') {");
-    expect(script).toMatch(/LEMBRETE: desligue o audit log[^\n]*NEW_RELIC_AUDIT_LOG_ENABLED[^\n]*Restart-Service rsd-backend/);
-    expect(script).toMatch(/if \(\$leakTotal -gt 0\) \{ exit 1 \}\s*$/);
+    expect(script).toMatch(/LEMBRETE:[^\n]*NEW_RELIC_LOG_LEVEL[^\n]*Restart-Service rsd-backend/);
+    expect(script).toMatch(/if \(\$exitCode -ne 0\) \{ exit \$exitCode \}\s*$/);
+  });
+
+  // No newrelic 14.12.0 o audit_log é ignorado (Logger.prototype.configure não copia auditLogging);
+  // os envios só são gravados com o log do agente em trace.
+  it('o roteiro usa NEW_RELIC_LOG_LEVEL=trace (o audit log não funciona no 14.12.0), e o aviso confere essa variável', () => {
+    const full = read('check-newrelic-secrets.ps1');
+    expect(full).toContain("NEW_RELIC_LOG_LEVEL='trace'");
+    expect(full).toContain('Logger.prototype.configure');
+    expect(script).toContain("$envValues['NEW_RELIC_LOG_LEVEL']");
+    expect(script).not.toContain("$envValues['NEW_RELIC_AUDIT_LOG_ENABLED']");
+    expect(read('../README.md')).not.toContain("NEW_RELIC_AUDIT_LOG_ENABLED='true'");
+  });
+
+  it('arquivos pela função que sempre inclui o .out.log e o .err.log; tamanho lido do arquivo aberto; envios contados', () => {
+    expect(script).toContain('Get-NewRelicCheckFiles -LogDir $P.Logs -Since $Since -ServiceName $ServiceName');
+    expect(script).not.toMatch(/LastWriteTime -ge \$Since/);
+    expect(script).toContain('$bytes = $stream.Length');
+    expect(script).toContain('Measure-AgentPosts -Lines $lines');
+    expect(script).toMatch(/elseif \(\$posts -eq 0\) \{[^}]*INCONCLUSIVO: nenhum envio gravado[^}]*\$exitCode = 2/);
   });
 
   onWindows('com o PowerShell de verdade', () => {
@@ -1083,32 +1102,138 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
       REAL_POWERSHELL_TEST_TIMEOUT_MS,
     );
 
+    // Linhas no formato do log do agente em trace: o corpo é uma string dentro do JSON, com as aspas
+    // escapadas. A chave é montada em tempo de execução (nenhuma literal no formato de license key).
+    const posting = (body: string) =>
+      JSON.stringify({
+        v: 0,
+        level: 10,
+        name: 'newrelic',
+        component: 'collector_api',
+        body,
+        msg: 'Posting to https://collector.newrelic.com:443/agent_listener/invoke_raw_method?marshal_format=json&protocol_version=17&license_key=REDACTED&method=connect',
+      });
+    const findLines = () => [
+      posting(JSON.stringify([{ pid: 1, settings: { app_name: ['RSD (demo)'], license_key: KEY, proxy: '****' } }])), // 1: esperada
+      JSON.stringify({ msg: 'Posting to https://collector.newrelic.com/agent_listener/invoke_raw_method?license_key=' + KEY + '&method=metric_data' }), // 2: chave na URL
+      JSON.stringify({ message: 'config', license_key: KEY }), // 3: "license_key" fora de um envio
+      posting(JSON.stringify([{ message: 'log do app com ' + KEY + ' dentro' }])), // 4: dentro de um log enviado
+      'linha sem segredo nenhum', // 5
+      JSON.stringify({ message: 'jwt ' + ENV.JWT_SECRET }), // 6
+      JSON.stringify({ headers: { 'X-License-Key': KEY } }), // 7: cabeçalho
+      '{"error.message":"conexão com Db@Senha_9 recusada"}', // 8
+    ];
+    const psLines = (lines: string[]) => '@(' + lines.map((l) => "'" + l.replace(/'/g, "''") + "'").join(', ') + ')';
+    const secretsPs = () =>
+      "$s = @(Get-BackendSecrets -EnvValues @{ JWT_SECRET = '" + ENV.JWT_SECRET + "'; LDAP_SEARCH_BIND_PASSWORD = '" + ENV.LDAP_SEARCH_BIND_PASSWORD +
+      "'; NEW_RELIC_LICENSE_KEY = '" + KEY + "'; DATABASE_URL = '" + ENV.DATABASE_URL + "' })";
+
     it(
-      'Find-SecretOccurrences: chave no transporte ao coletor é esperada; em payload de log, vazamento; o resultado não traz valores',
+      'Find-SecretOccurrences: a chave só é esperada como "license_key" do JSON de configuração num "Posting to"; o resto é vazamento',
       () => {
-        const lines = [
-          `{"component":"collector_api","msg":"Posting to https://collector.newrelic.com/agent_listener/invoke_raw_method?marshal_format=json&license_key=${KEY}&method=connect"}`,
-          `{"headers":{"X-License-Key":"${KEY}","Content-Type":"application/json"}}`,
-          `{"message":"linha de log com ${KEY} dentro","level":"INFO"}`,
-          'linha sem segredo nenhum',
-          `{"message":"jwt ${ENV.JWT_SECRET}"}`,
-          `license_key=${KEY} e de novo ${KEY} solto`,
-          '{"error.message":"conexão com Db@Senha_9 recusada"}',
-        ];
-        const out = runPs(`
-          $lines = @(${lines.map((l) => `'${l.replace(/'/g, "''")}'`).join(', ')})
-          $s = @(Get-BackendSecrets -EnvValues @{ JWT_SECRET = '${ENV.JWT_SECRET}'; LDAP_SEARCH_BIND_PASSWORD = '${ENV.LDAP_SEARCH_BIND_PASSWORD}'; NEW_RELIC_LICENSE_KEY = '${KEY}'; DATABASE_URL = '${ENV.DATABASE_URL}' })
-          ConvertTo-Json -Compress -Depth 4 @(Find-SecretOccurrences -Lines $lines -Secrets $s)`) as { Name: string; Expected: number; Leaks: number; LeakLines: number[] }[];
+        const out = runPs(
+          '$lines = ' + psLines(findLines()) + '\n' + secretsPs() + '\nConvertTo-Json -Compress -Depth 4 @(Find-SecretOccurrences -Lines $lines -Secrets $s)',
+        ) as { Name: string; Expected: number; Leaks: number; LeakLines: number[] }[];
         const by = (name: string) => out.filter((r) => r.Name === name);
-        expect(by('NEW_RELIC_LICENSE_KEY')).toEqual([{ Name: 'NEW_RELIC_LICENSE_KEY', Expected: 3, Leaks: 2, LeakLines: [3, 6] }]);
-        expect(by('JWT_SECRET')).toEqual([{ Name: 'JWT_SECRET', Expected: 0, Leaks: 1, LeakLines: [5] }]);
+        expect(by('NEW_RELIC_LICENSE_KEY')).toEqual([{ Name: 'NEW_RELIC_LICENSE_KEY', Expected: 1, Leaks: 4, LeakLines: [2, 3, 4, 7] }]);
+        expect(by('JWT_SECRET')).toEqual([{ Name: 'JWT_SECRET', Expected: 0, Leaks: 1, LeakLines: [6] }]);
         expect(by('LDAP_SEARCH_BIND_PASSWORD')).toEqual([{ Name: 'LDAP_SEARCH_BIND_PASSWORD', Expected: 0, Leaks: 0, LeakLines: [] }]);
-        expect(by('DATABASE_URL (senha)').map((r) => r.Leaks)).toEqual([0, 1]); // crua: não aparece; decodificada: linha 7
+        expect(by('DATABASE_URL (senha)').map((r) => r.Leaks)).toEqual([0, 1]);
         const json = JSON.stringify(out);
         for (const v of [KEY, ENV.JWT_SECRET, ENV.LDAP_SEARCH_BIND_PASSWORD, 'Db@Senha_9', 'Db%40Senha_9']) expect(json).not.toContain(v);
       },
       REAL_POWERSHELL_TEST_TIMEOUT_MS,
     );
+
+    it(
+      'Measure-AgentPosts conta só as linhas "Posting to"',
+      () => {
+        expect(runPs('ConvertTo-Json (Measure-AgentPosts -Lines ' + psLines(findLines()) + ')')).toBe(3);
+        expect(runPs("ConvertTo-Json (Measure-AgentPosts -Lines @('nada', ''))")).toBe(0);
+      },
+      REAL_POWERSHELL_TEST_TIMEOUT_MS,
+    );
+
+    describe('o script inteiro, numa pasta de teste (cópia sem o #Requires, Read-Host simulado)', () => {
+      let root: string;
+      beforeEach(() => {
+        root = mkdtempSync(join(tmpdir(), 'rsd-nrcheck-'));
+        mkdirSync(join(root, 'config'));
+        mkdirSync(join(root, 'logs'));
+        mkdirSync(join(root, 'deploy'));
+        writeFileSync(
+          join(root, 'config', 'backend.env'),
+          ["JWT_SECRET='" + ENV.JWT_SECRET + "'", "NEW_RELIC_LICENSE_KEY='" + KEY + "'", "DATABASE_URL='" + ENV.DATABASE_URL + "'", "NEW_RELIC_LOG_LEVEL='trace'"].join('\r\n'),
+        );
+        copyFileSync(join(DEPLOY, 'rsd-deploy-common.ps1'), join(root, 'deploy', 'rsd-deploy-common.ps1'));
+        const body = readFileSync(join(DEPLOY, 'check-newrelic-secrets.ps1'), 'utf8').replace(/^﻿?#Requires -RunAsAdministrator\r?\n/, '');
+        writeFileSync(join(root, 'deploy', 'check-copy.ps1'), '﻿' + body);
+        writeFileSync(
+          join(root, 'deploy', 'wrapper.ps1'),
+          '﻿' +
+            [
+              'param([string]$Root)',
+              "$global:q = [Collections.Generic.Queue[string]]::new([string[]]@('', 'nao'))",
+              'function global:Read-Host { param([string]$Prompt, [switch]$AsSecureString) $v = $global:q.Dequeue(); if ($AsSecureString) { return (New-Object Security.SecureString) }; return $v }',
+              "& (Join-Path $PSScriptRoot 'check-copy.ps1') -Root $Root -Since ((Get-Date).AddMinutes(-10))",
+              'exit $LASTEXITCODE',
+            ].join('\r\n'),
+        );
+      });
+      afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+      /** Grava um log com data de modificação ANTIGA (como o Windows mostra o arquivo aberto pelo WinSW). */
+      const oldLog = (name: string, lines: string[]) => {
+        const p = join(root, 'logs', name);
+        writeFileSync(p, lines.join('\r\n'));
+        const old = new Date('2026-01-01T09:27:00');
+        utimesSync(p, old, old);
+      };
+      const run = () => {
+        const r = spawnSync(PS, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'deploy', 'wrapper.ps1'), '-Root', root], { encoding: 'utf8' });
+        return { code: r.status, out: (r.stdout + r.stderr).replace(/\r/g, '') };
+      };
+
+      it(
+        'item 1: o rsd-backend.out.log é lido mesmo com a data antiga na listagem, e mostra o tamanho lido',
+        () => {
+          oldLog('rsd-backend.out.log', [posting(JSON.stringify([{ settings: { license_key: KEY } }]))]);
+          oldLog('outro-antigo.log', ['não deve ser lido']);
+          const { code, out } = run();
+          expect(out).toMatch(/rsd-backend\.out\.log: [\d.,]+ bytes, 1 envio\(s\) do agente/);
+          expect(out).not.toContain('outro-antigo.log:');
+          expect(out).toContain('OK: nenhum segredo fora do esperado em 1 envio(s) do agente.');
+          expect(out).toContain('esperadas (configuração do agente enviada ao coletor): 1');
+          expect(code).toBe(0);
+        },
+        REAL_POWERSHELL_TEST_TIMEOUT_MS,
+      );
+
+      it(
+        'item 3: sem nenhum "Posting to", INCONCLUSIVO e código 2 (nunca verde)',
+        () => {
+          oldLog('rsd-backend.out.log', ['[Nest] LOG Backend escutando', 'nada do agente']);
+          const { code, out } = run();
+          expect(out).toContain('INCONCLUSIVO: nenhum envio gravado');
+          expect(out).not.toContain('OK: nenhum segredo');
+          expect(code).toBe(2);
+        },
+        REAL_POWERSHELL_TEST_TIMEOUT_MS,
+      );
+
+      it(
+        'vazamento (a chave dentro de um log enviado): código 1, com arquivo e linha, sem mostrar o valor',
+        () => {
+          oldLog('rsd-backend.out.log', [posting(JSON.stringify([{ settings: { license_key: KEY } }])), posting(JSON.stringify([{ message: 'vazou ' + KEY }]))]);
+          const { code, out } = run();
+          expect(out).toContain('VAZAMENTO: 1 ocorrência(s)');
+          expect(out).toContain('rsd-backend.out.log: linhas 2');
+          expect(out).not.toContain(KEY);
+          expect(code).toBe(1);
+        },
+        REAL_POWERSHELL_TEST_TIMEOUT_MS,
+      );
+    });
   });
 });
 
