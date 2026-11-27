@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import { Tooltip, TooltipTarget } from './Tooltip';
 
@@ -12,14 +12,14 @@ describe('TooltipTarget — gatilho nativo para texto ou selo com dica', () => {
     );
     const trigger = screen.getByRole('button', { name: 'há 27 min' });
     expect(trigger).toHaveAttribute('type', 'button');
-    await userEvent.setup().tab();
+    await setupUser().tab();
     expect(trigger).toHaveFocus();
     expect(trigger).toHaveAccessibleDescription('Data completa');
   });
 
   it('dentro de um formulário, clicar ou apertar Enter nele não envia o formulário', async () => {
     const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault());
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <form onSubmit={onSubmit}>
         <Tooltip content="ProductCode {X}">
@@ -54,7 +54,7 @@ describe('TooltipTarget — gatilho nativo para texto ou selo com dica', () => {
         </button>
       </Tooltip>,
     );
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.tab();
     await user.keyboard('a');
     expect(onFocus).toHaveBeenCalled();
@@ -65,7 +65,7 @@ describe('TooltipTarget — gatilho nativo para texto ou selo com dica', () => {
 
 describe('Tooltip — dica acessível (mouse, teclado e leitor de tela)', () => {
   it('fechada não ocupa espaço; abre ao passar o mouse e fecha ao sair', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <Tooltip content="Data completa: 19/11/2026 22:42">
         <span tabIndex={0}>há 27 min</span>
@@ -80,7 +80,7 @@ describe('Tooltip — dica acessível (mouse, teclado e leitor de tela)', () => 
   });
 
   it('abre ao receber foco pelo Tab e fecha com Esc', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <Tooltip content="Consultar de novo">
         <button type="button">↻</button>

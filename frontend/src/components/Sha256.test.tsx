@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import { Sha256 } from './Sha256';
 
@@ -14,7 +14,7 @@ describe('Sha256 — hash abreviado, inteiro na dica e botão de copiar', () => 
   });
 
   it('copia o valor INTEIRO para a área de transferência e confirma', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     render(<Sha256 value={HASH} />);
     expect(screen.getByRole('button', { name: 'Copiar SHA-256' })).toBeInTheDocument();
@@ -24,7 +24,7 @@ describe('Sha256 — hash abreviado, inteiro na dica e botão de copiar', () => 
   });
 
   it('sem permissão de área de transferência, não quebra (o valor continua na dica)', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('negado'));
     render(<Sha256 value={HASH} />);
     await user.click(screen.getByTestId('copy-sha256'));

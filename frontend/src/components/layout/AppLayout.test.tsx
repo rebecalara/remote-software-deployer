@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/user';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -51,7 +51,7 @@ describe('AppLayout — cabeçalho e gaveta do menu (celular)', () => {
   });
 
   it('"Abrir menu" abre a gaveta; o fundo escuro (role="presentation") fecha ao clicar', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderLayout();
     await user.click(screen.getByRole('button', { name: 'Abrir menu' }));
     expect(screen.getByRole('dialog', { name: 'Menu' })).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe('AppLayout — cabeçalho e gaveta do menu (celular)', () => {
   });
 
   it('Esc fecha a gaveta', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderLayout();
     await user.click(screen.getByRole('button', { name: 'Abrir menu' }));
     expect(screen.getByRole('dialog', { name: 'Menu' })).toBeInTheDocument();
@@ -72,7 +72,7 @@ describe('AppLayout — cabeçalho e gaveta do menu (celular)', () => {
 
   it('com uma janela de confirmação aberta por cima, o Esc é dela: a gaveta continua aberta', async () => {
     const onCancel = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     renderLayout(<PageWithDialog onCancel={onCancel} />);
     // Abre a gaveta "por baixo" da janela (o clique no botão atravessaria o fundo da janela).
     screen.getByRole('button', { name: 'Abrir menu', hidden: true }).click();
@@ -88,12 +88,12 @@ describe('AppLayout — cabeçalho e gaveta do menu (celular)', () => {
 
   it('Esc com a gaveta fechada não faz nada', async () => {
     renderLayout();
-    await userEvent.setup().keyboard('{Escape}');
+    await setupUser().keyboard('{Escape}');
     expect(screen.getByText('conteúdo do Histórico')).toBeInTheDocument();
   });
 
   it('pelo teclado, a gaveta fecha pelo botão "Fechar menu"', async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     renderLayout();
     await user.click(screen.getByRole('button', { name: 'Abrir menu' }));
     await user.click(screen.getByRole('button', { name: 'Fechar menu' }));

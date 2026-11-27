@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import { setMatchMedia } from '../test/setup';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -14,14 +14,14 @@ describe('SidePanel — painel lateral (Detalhes da máquina, Catálogo)', () =>
       </SidePanel>,
     );
     expect(screen.getByRole('complementary', { name: 'Detalhes da máquina' })).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Fechar detalhes' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Fechar detalhes' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('Esc pede para fechar', async () => {
     const onClose = vi.fn();
     render(<SidePanel title="Painel" onClose={onClose}>x</SidePanel>);
-    await userEvent.setup().keyboard('{Escape}');
+    await setupUser().keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -38,7 +38,7 @@ describe('SidePanel — painel lateral (Detalhes da máquina, Catálogo)', () =>
         </ConfirmDialog>
       </>,
     );
-    await userEvent.setup().keyboard('{Escape}');
+    await setupUser().keyboard('{Escape}');
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -49,7 +49,7 @@ describe('SidePanel — painel lateral (Detalhes da máquina, Catálogo)', () =>
     expect(container.firstElementChild).toHaveClass('fixed');
     // Sem papel interativo: é só um atalho de mouse (o teclado usa Esc e o X).
     expect(container.querySelector('.bg-slate-950\\/40')).toHaveAttribute('role', 'presentation');
-    await userEvent.setup().click(container.querySelector('.bg-slate-950\\/40')!);
+    await setupUser().click(container.querySelector('.bg-slate-950\\/40')!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
