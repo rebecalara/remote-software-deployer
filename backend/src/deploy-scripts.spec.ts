@@ -1113,6 +1113,11 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
         body,
         msg: 'Posting to https://collector.newrelic.com:443/agent_listener/invoke_raw_method?marshal_format=json&protocol_version=17&license_key=REDACTED&method=connect',
       });
+    // JSON de configuração do agente (config.publicSettings()), como string no campo "data".
+    const agentConfig = () => JSON.stringify([{ pid: 1, host: 'collector.newrelic.com', settings: { app_name: ['RSD (demo)'], license_key: KEY } }]);
+    // Linha de trace do agente antes do envio (lib/collector/remote-method.js: "Calling %s on collector API").
+    const calling = (method: string, data: string) =>
+      JSON.stringify({ v: 0, level: 10, name: 'newrelic', msg: 'Calling ' + method + ' on collector API', component: 'remote_method', data, compressed: false });
     const findLines = () => [
       posting(JSON.stringify([{ pid: 1, settings: { app_name: ['RSD (demo)'], license_key: KEY, proxy: '****' } }])), // 1: esperada
       JSON.stringify({ msg: 'Posting to https://collector.newrelic.com/agent_listener/invoke_raw_method?license_key=' + KEY + '&method=metric_data' }), // 2: chave na URL
@@ -1122,6 +1127,12 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
       JSON.stringify({ message: 'jwt ' + ENV.JWT_SECRET }), // 6
       JSON.stringify({ headers: { 'X-License-Key': KEY } }), // 7: cabeçalho
       '{"error.message":"conexão com Db@Senha_9 recusada"}', // 8
+      calling('connect', agentConfig()), // 9: esperada (visto na APP-RSD)
+      calling('agent_settings', agentConfig()), // 10: esperada (visto na APP-RSD)
+      calling('metric_data', agentConfig()), // 11: outro método: vazamento
+      JSON.stringify({ level: 30, name: 'rsd', msg: 'log comum', data: agentConfig() }), // 12: log comum com o JSON: vazamento
+      JSON.stringify({ level: 10, name: 'newrelic', msg: 'Calling connect on collector API', data: agentConfig() }), // 13: sem o component remote_method: vazamento
+      calling('preconnect', agentConfig()), // 14: esperada
     ];
     const psLines = (lines: string[]) => '@(' + lines.map((l) => "'" + l.replace(/'/g, "''") + "'").join(', ') + ')';
     const secretsPs = () =>
@@ -1129,13 +1140,16 @@ describe('deploy/check-newrelic-secrets.ps1 — prova de que nenhum segredo vai 
       "'; NEW_RELIC_LICENSE_KEY = '" + KEY + "'; DATABASE_URL = '" + ENV.DATABASE_URL + "' })";
 
     it(
-      'Find-SecretOccurrences: a chave só é esperada como "license_key" do JSON de configuração num "Posting to"; o resto é vazamento',
+      'Find-SecretOccurrences: a chave só é esperada como "license_key" do JSON de configuração em linhas do agente (Calling/Posting to de connect, preconnect e agent_settings); o resto é vazamento',
       () => {
         const out = runPs(
           '$lines = ' + psLines(findLines()) + '\n' + secretsPs() + '\nConvertTo-Json -Compress -Depth 4 @(Find-SecretOccurrences -Lines $lines -Secrets $s)',
         ) as { Name: string; Expected: number; Leaks: number; LeakLines: number[] }[];
         const by = (name: string) => out.filter((r) => r.Name === name);
-        expect(by('NEW_RELIC_LICENSE_KEY')).toEqual([{ Name: 'NEW_RELIC_LICENSE_KEY', Expected: 1, Leaks: 4, LeakLines: [2, 3, 4, 7] }]);
+        // Esperadas: 1 (Posting to do connect), 9 e 10 (Calling connect/agent_settings, vistas na APP-RSD) e 14 (preconnect).
+        // Vazamentos: URL (2), JSON fora de um envio (3), dentro de um log enviado (4), cabeçalho (7), Calling metric_data (11),
+        // log comum com o JSON (12) e linha sem o component remote_method (13).
+        expect(by('NEW_RELIC_LICENSE_KEY')).toEqual([{ Name: 'NEW_RELIC_LICENSE_KEY', Expected: 4, Leaks: 7, LeakLines: [2, 3, 4, 7, 11, 12, 13] }]);
         expect(by('JWT_SECRET')).toEqual([{ Name: 'JWT_SECRET', Expected: 0, Leaks: 1, LeakLines: [6] }]);
         expect(by('LDAP_SEARCH_BIND_PASSWORD')).toEqual([{ Name: 'LDAP_SEARCH_BIND_PASSWORD', Expected: 0, Leaks: 0, LeakLines: [] }]);
         expect(by('DATABASE_URL (senha)').map((r) => r.Leaks)).toEqual([0, 1]);

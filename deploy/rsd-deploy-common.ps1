@@ -415,13 +415,31 @@ function Get-NewRelicCheckFiles {
       Where-Object { $_.LastWriteTime -ge $Since -or $always -contains $_.Name } | Sort-Object FullName)
 }
 
+# Métodos do coletor cujo corpo é o JSON de configuração do agente (com a license key em texto).
+$script:AgentConfigMethods = '(?:connect|preconnect|agent_settings)'
+
+# Linha de trace do próprio agente que leva o JSON de configuração ao coletor (newrelic 14.12.0,
+# lib/collector/remote-method.js), só nos métodos connect, preconnect e agent_settings:
+#  - "Calling <método> on collector API" (component "remote_method", com o corpo em "data"), gravada
+#    antes do envio;
+#  - "Posting to https://.../invoke_raw_method?...&method=<método>", com o corpo em "body".
+function Test-AgentConfigLine {
+  param([AllowEmptyString()][string]$Line)
+  if (-not $Line) { return $false }
+  $m = $script:AgentConfigMethods
+  if ($Line.Contains($script:AgentPostMarker) -and $Line -match "[?&]method=$m(?:[&`"\\\s]|$)") { return $true }
+  return ($Line -match '"component"\s*:\s*"remote_method"' -and $Line -match "Calling $m on collector API")
+}
+
 # Conta, linha a linha, onde cada segredo aparece. Qualquer ocorrência é vazamento, com UMA exceção
 # para a chave do New Relic: como valor de "license_key" no JSON de configuração do agente, numa linha
-# "Posting to". No 14.12.0, o corpo dos métodos connect e agent_settings é o config.publicSettings()
-# (lib/collector/facts.js e api.js), que só mascara proxy e certificados: a chave vai em texto, só
-# para o coletor (collector.newrelic.com). No log, esse corpo é uma string dentro do JSON, então as
-# aspas podem vir escapadas (\"license_key\":\"...\"). Na URL do "Posting to" a chave já sai mascarada
-# (redacted_license_key); a chave em texto em qualquer outro lugar é vazamento.
+# de trace do próprio agente com esse JSON (Test-AgentConfigLine: "Calling connect|preconnect|
+# agent_settings on collector API" ou o "Posting to" desses métodos). No 14.12.0, o corpo desses
+# métodos é o config.publicSettings() (lib/collector/facts.js e api.js), que só mascara proxy e
+# certificados: a chave vai em texto, só para o coletor (collector.newrelic.com). No log, esse corpo é
+# uma string dentro do JSON, então as aspas podem vir escapadas (\"license_key\":\"...\"). Na URL do
+# "Posting to" a chave já sai mascarada (redacted_license_key); a chave em texto em qualquer outro
+# lugar — outro método (ex.: metric_data), log comum, URL, cabeçalho — é vazamento.
 function Find-SecretOccurrences {
   param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Secrets)
   $results = foreach ($s in $Secrets) {
@@ -432,7 +450,7 @@ function Find-SecretOccurrences {
       $line = $Lines[$i]
       if ($null -eq $line -or -not $line.Contains($s.Value)) { continue }
       $rest = $line
-      if ($s.Name -eq $script:NewRelicLicenseName -and $line.Contains($script:AgentPostMarker)) {
+      if ($s.Name -eq $script:NewRelicLicenseName -and (Test-AgentConfigLine -Line $line)) {
         $expectedHere = ([regex]::Matches($line, $expectedContexts)).Count
         $expected += $expectedHere
         $rest = [regex]::Replace($line, $expectedContexts, '')
