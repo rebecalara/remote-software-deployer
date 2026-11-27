@@ -676,9 +676,11 @@ usuário e IPs dos operadores ficam guardados num serviço de fora.
    cada arquivo e quantos envios do agente encontrou, e procura cada segredo do `backend.env` (e a
    senha de teste) — só nomes, contagens e linhas, nunca o valor.
    - A chave do New Relic tem **uma** ocorrência esperada: como valor de `license_key` no JSON de
-     configuração que o agente manda ao coletor (métodos `connect` e `agent_settings`, que no
-     14.12.0 vão com a chave em texto, só para `collector.newrelic.com`). Em qualquer outro lugar,
-     conta como vazamento.
+     configuração que o agente manda ao coletor (métodos `connect`, `preconnect` e
+     `agent_settings`, que no 14.12.0 vão com a chave em texto, só para `collector.newrelic.com`),
+     nas linhas de trace do agente que levam esse JSON: `Calling <método> on collector API`
+     (component `remote_method`) e o `Posting to` do método. Em qualquer outro lugar — outro método
+     (como `metric_data`), log comum, URL, cabeçalho —, conta como vazamento.
    - Saída: `0` sem vazamento; `1` vazamento; `2` **INCONCLUSIVO**, sem nenhum envio
      `Posting to` gravado (o log não estava em trace ou o agente não enviou nada).
 4. O script oferece apagar os logs do período (digite `SIM`) e lembra de **tirar o

@@ -24,9 +24,11 @@
   modificação na listagem, e o arquivo principal ficava de fora.
 
   A chave do New Relic tem UMA ocorrência esperada: como valor de "license_key" no JSON de
-  configuração que o agente manda ao coletor nos métodos connect e agent_settings (numa linha
-  "Posting to"). Em qualquer outro lugar conta como vazamento. Os outros segredos — e a senha de
-  teste do login — contam em qualquer lugar.
+  configuração que o agente manda ao coletor nos métodos connect, preconnect e agent_settings, nas
+  linhas de trace do próprio agente que levam esse JSON ("Calling <método> on collector API", do
+  component remote_method, e o "Posting to" do método). Em qualquer outro lugar — outro método
+  (ex.: metric_data), log comum, URL, cabeçalho — conta como vazamento. Os outros segredos — e a
+  senha de teste do login — contam em qualquer lugar.
 
   Saída: 0 = nenhum vazamento, com envios conferidos; 1 = vazamento; 2 = INCONCLUSIVO (nenhum envio
   "Posting to" nos logs: o log não estava em trace ou o agente não enviou nada no período).
