@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import { ListPagination } from './ListPagination';
 
@@ -20,7 +20,7 @@ describe('ListPagination — "1–100 de 250 · Anterior · Página 1 de 3 · Pr
     const onPage = vi.fn();
     render(<ListPagination page={1} totalPages={3} first={1} last={100} total={250} onPage={onPage} />);
     expect(screen.getByRole('button', { name: 'Anterior' })).toBeDisabled();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Próxima' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Próxima' }));
     expect(onPage).toHaveBeenCalledWith(2);
   });
 
@@ -28,7 +28,7 @@ describe('ListPagination — "1–100 de 250 · Anterior · Página 1 de 3 · Pr
     const onPage = vi.fn();
     render(<ListPagination page={3} totalPages={3} first={201} last={250} total={250} onPage={onPage} />);
     expect(screen.getByRole('button', { name: 'Próxima' })).toBeDisabled();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Anterior' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Anterior' }));
     expect(onPage).toHaveBeenCalledWith(2);
   });
 });

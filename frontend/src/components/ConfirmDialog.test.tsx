@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -11,7 +11,7 @@ function renderDialog() {
       As alterações não salvas serão perdidas.
     </ConfirmDialog>,
   );
-  return { onCancel, onConfirm, user: userEvent.setup() };
+  return { onCancel, onConfirm, user: setupUser() };
 }
 
 describe('ConfirmDialog — janela de confirmação do sistema', () => {

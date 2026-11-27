@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/user';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../context/AuthContext';
@@ -46,7 +46,7 @@ describe('Sidebar — menu por perfil', () => {
     const { onToggleCollapsed } = renderMenu('ADMIN', { collapsed: true });
     expect(screen.queryByText('Histórico')).not.toBeInTheDocument();
     expect(screen.getByTitle('Histórico')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Expandir menu' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Expandir menu' }));
     expect(onToggleCollapsed).toHaveBeenCalled();
   });
 
@@ -54,13 +54,13 @@ describe('Sidebar — menu por perfil', () => {
     const onCloseMobile = vi.fn();
     renderMenu('ADMIN', { onCloseMobile });
     expect(screen.queryByRole('button', { name: 'Recolher menu' })).not.toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Fechar menu' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Fechar menu' }));
     expect(onCloseMobile).toHaveBeenCalled();
   });
 
   it('"Sair"', async () => {
     const { onLogout } = renderMenu('ADMIN');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Sair' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Sair' }));
     expect(onLogout).toHaveBeenCalled();
   });
 });

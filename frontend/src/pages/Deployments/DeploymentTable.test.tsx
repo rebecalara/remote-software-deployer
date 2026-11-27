@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/user';
 import { describe, expect, it, vi } from 'vitest';
 import type { DeploymentSummary } from '../../types/deployment';
 import { DeploymentTable, toggleInSet } from './DeploymentTable';
@@ -103,7 +103,7 @@ describe('DeploymentTable — mesma tabela no Monitoramento, no Histórico e no 
 
   it('clicar na linha ou no botão abre a implantação ali mesmo', async () => {
     const { onToggle } = renderTable([deployment({})]);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Expandir 7-Zip 26.06' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Expandir 7-Zip 26.06' }));
     expect(onToggle).toHaveBeenCalledWith('d1');
   });
 

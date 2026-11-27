@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/user';
 import { BrowserRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../context/AuthContext';
@@ -99,7 +99,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
     vi.mocked(listDeployments).mockResolvedValue(page([item('d1')], 45));
     openAt('/history');
     expect(await screen.findByTestId('page-range')).toHaveTextContent('1–20 de 45');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Próxima' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Próxima' }));
     await waitFor(() => expect(search().get('page')).toBe('2'));
     await waitFor(() => expect(lastFilters()).toEqual(expect.objectContaining({ page: 2 })));
   });
@@ -107,7 +107,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
   it('mudar um filtro volta para a página 1 e fica no endereço', async () => {
     openAt('/history?page=3&softwareId=s1');
     await screen.findAllByTestId('deployment-title');
-    await userEvent.setup().selectOptions(screen.getByLabelText('Status'), 'FAILED');
+    await setupUser().selectOptions(screen.getByLabelText('Status'), 'FAILED');
     await waitFor(() => expect(search().get('status')).toBe('FAILED'));
     expect(search().get('page')).toBeNull();
     expect(search().get('softwareId')).toBe('s1');
@@ -116,7 +116,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
   it('busca por máquina espera parar de digitar e vai para o endereço', async () => {
     openAt('/history');
     await screen.findAllByTestId('deployment-title');
-    await userEvent.setup().type(screen.getByLabelText('Máquina'), 'rsd-alvo');
+    await setupUser().type(screen.getByLabelText('Máquina'), 'rsd-alvo');
     await waitFor(() => expect(search().get('machine')).toBe('rsd-alvo'), { timeout: 2000 });
     await waitFor(() => expect(lastFilters()).toEqual(expect.objectContaining({ machine: 'rsd-alvo' })));
   });
@@ -128,7 +128,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
     // Um "Limpar filtros" só (o da barra some com a lista vazia).
     const clear = screen.getAllByRole('button', { name: 'Limpar filtros' });
     expect(clear).toHaveLength(1);
-    await userEvent.setup().click(clear[0]);
+    await setupUser().click(clear[0]);
     await waitFor(() => expect(window.location.search).toBe('?mine=true'));
   });
 
@@ -161,7 +161,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
     });
     openAt('/history?status=FAILED&mine=true');
     await screen.findAllByTestId('deployment-title');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Exportar CSV' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Exportar CSV' }));
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(exportDeploymentsCsv).toHaveBeenCalledWith(lastFilters());
     expect(createObjectURL).toHaveBeenCalled();
@@ -171,7 +171,7 @@ describe('HistoryPage — filtros no endereço, vazios e exportação', () => {
     vi.mocked(exportDeploymentsCsv).mockRejectedValue(new ApiError(400, 'Muitos resultados para exportar; refine os filtros.'));
     openAt('/history');
     await screen.findAllByTestId('deployment-title');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Exportar CSV' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Exportar CSV' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Muitos resultados para exportar; refine os filtros.');
   });
 });

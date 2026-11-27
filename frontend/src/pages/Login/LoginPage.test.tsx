@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from '../../test/user';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../../context/AuthContext';
@@ -28,7 +28,7 @@ function renderLogin(state?: { from: string }) {
 }
 
 async function fillAndSubmit(username = ' TestUser ', password = 'senha123') {
-  const user = userEvent.setup();
+  const user = setupUser();
   await user.type(screen.getByLabelText('Usuário'), username);
   await user.type(screen.getByLabelText('Senha'), password);
   await user.click(screen.getByRole('button', { name: 'Entrar' }));
@@ -104,7 +104,7 @@ describe('LoginPage', () => {
     renderLogin();
     const button = screen.getByRole('button', { name: 'Entrar' });
     expect(button).toBeDisabled();
-    await userEvent.setup().type(screen.getByLabelText('Usuário'), 'testuser');
+    await setupUser().type(screen.getByLabelText('Usuário'), 'testuser');
     expect(button).toBeDisabled();
   });
 
@@ -113,7 +113,7 @@ describe('LoginPage', () => {
     const password = screen.getByLabelText('Senha');
     expect(password).not.toHaveAttribute('placeholder');
     expect(password).toHaveAttribute('type', 'password');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Mostrar senha' }));
+    await setupUser().click(screen.getByRole('button', { name: 'Mostrar senha' }));
     expect(password).toHaveAttribute('type', 'text');
   });
 

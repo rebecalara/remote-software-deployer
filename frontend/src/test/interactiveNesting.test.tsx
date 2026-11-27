@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { setupUser } from './user';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -180,7 +180,7 @@ describe('nenhum elemento interativo dentro de outro (componentes com dica)', ()
         onSelect={() => {}}
       />,
     );
-    await userEvent.setup().click(screen.getByRole('button', { name: /não pode ser desinstalado/ }));
+    await setupUser().click(screen.getByRole('button', { name: /não pode ser desinstalado/ }));
     expect(screen.getByTestId('blocked-item')).toHaveAttribute('data-tooltip-target');
     expect(nestingProblems()).toEqual([]);
     unmount();
